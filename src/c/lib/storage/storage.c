@@ -42,11 +42,14 @@ typedef struct {
 } StoreHdr;
 
 static StorageConfig s_cfg;
-static uint32_t s_seq[STORAGE_CACHE_MAX];                 // seq per cache slot (0 = newest)
-// 4-byte aligned so callers can read a slot back through a struct pointer whose
-// first field is a word (e.g. MKHistGame.date). record_size is a multiple of 4
-// for the same reason, so every slot/page offset stays aligned too.
-static uint8_t  s_rec[STORAGE_CACHE_MAX][STORAGE_REC_MAX] __attribute__((aligned(4)));
+// All RAM the store needs is carved from the caller-provided arena in storage_open,
+// so the library has no fixed cache ceiling. Slots and the page buffer are read
+// back through struct pointers, so the arena must be 4-byte aligned and record_size
+// a multiple of 4 to keep every slot/page offset word-aligned (see StorageConfig).
+static uint32_t *s_seq;    // [cache_capacity]  seq per cache slot (index 0 = newest)
+static uint8_t  *s_rec;    // cache mirror: cache_capacity slots of record_size (flat)
+static uint8_t  *s_page;   // page read-back scratch: up to cache_capacity records
+static uint8_t  *s_txbuf;  // push frame scratch: up to cache_capacity frames
 static uint8_t  s_count;
 static uint32_t s_next_seq = 1;                            // 0 is reserved as "no seq"
 static uint32_t s_acked;
@@ -62,13 +65,8 @@ static uint8_t  s_get_size;
 static uint32_t s_inflight_offset;    // offset of the GET currently in flight
 static uint8_t  s_max_batch = 1;      // records per message the negotiated buffers allow
 
-// Scratch buffers (static to keep them off the small app stack). s_page is read
-// back as records by the caller, so it is word-aligned like s_rec; s_txbuf only
-// holds wire frames (memcpy'd, never struct-accessed), so it needs none.
-static uint8_t s_txbuf[(STORAGE_REC_MAX + 4) * STORAGE_CACHE_MAX];
-static uint8_t s_page[STORAGE_REC_MAX * STORAGE_CACHE_MAX] __attribute__((aligned(4)));
-
 static uint16_t frame_size(void) { return s_cfg.record_size + 4; }
+static uint8_t *rec_slot(uint8_t i) { return s_rec + (uint16_t)i * s_cfg.record_size; }
 
 // ---- derived state ----
 static uint16_t unsynced_count(void) {
@@ -94,9 +92,9 @@ static void save_hdr(void) {
   persist_write_data(s_cfg.base_key, &h, sizeof(h));
 }
 static void save_slot(uint8_t i) {
-  uint8_t buf[STORAGE_REC_MAX + 4];
+  uint8_t *buf = s_txbuf;                                   // scratch is idle outside an in-flight push
   buf[0] = s_seq[i]; buf[1] = s_seq[i] >> 8; buf[2] = s_seq[i] >> 16; buf[3] = s_seq[i] >> 24;
-  memcpy(buf + 4, s_rec[i], s_cfg.record_size);
+  memcpy(buf + 4, rec_slot(i), s_cfg.record_size);
   persist_write_data(s_cfg.base_key + 1 + i, buf, frame_size());
 }
 static void save_all(void) {
@@ -112,11 +110,11 @@ static void load_persisted(void) {
   s_next_seq = h.next_seq ? h.next_seq : 1;
   s_acked    = h.acked_seq;
   s_count    = h.count > s_cfg.cache_capacity ? s_cfg.cache_capacity : h.count;
-  uint8_t buf[STORAGE_REC_MAX + 4];
+  uint8_t *buf = s_txbuf;                                   // scratch is idle during open
   for (uint8_t i = 0; i < s_count; i++) {
     if (persist_read_data(s_cfg.base_key + 1 + i, buf, frame_size()) != (int)frame_size()) { s_count = i; break; }
     s_seq[i] = (uint32_t)buf[0] | ((uint32_t)buf[1] << 8) | ((uint32_t)buf[2] << 16) | ((uint32_t)buf[3] << 24);
-    memcpy(s_rec[i], buf + 4, s_cfg.record_size);
+    memcpy(rec_slot(i), buf + 4, s_cfg.record_size);
   }
 }
 
@@ -132,7 +130,7 @@ static bool send_push(void) {
     uint8_t idx = u - 1 - k;
     uint8_t *f = s_txbuf + (uint16_t)k * fs;
     f[0] = s_seq[idx]; f[1] = s_seq[idx] >> 8; f[2] = s_seq[idx] >> 16; f[3] = s_seq[idx] >> 24;
-    memcpy(f + 4, s_rec[idx], s_cfg.record_size);
+    memcpy(f + 4, rec_slot(idx), s_cfg.record_size);
   }
   DictionaryIterator *it;
   if (app_message_outbox_begin(&it) != APP_MSG_OK) return false;
@@ -187,7 +185,7 @@ static void on_inbox(DictionaryIterator *it, void *context) {
     uint16_t fs = frame_size();
     if (d && d->length >= fs) {
       cnt = d->length / fs;
-      if (cnt > STORAGE_CACHE_MAX) cnt = STORAGE_CACHE_MAX;
+      if (cnt > s_cfg.cache_capacity) cnt = s_cfg.cache_capacity;   // s_page holds at most cache_capacity records
       const uint8_t *src = d->value->data;
       for (uint8_t i = 0; i < cnt; i++)
         memcpy(s_page + (uint16_t)i * s_cfg.record_size, src + (uint16_t)i * fs + 4, s_cfg.record_size);
@@ -218,9 +216,20 @@ static void on_connection(bool connected) {
 // ---- public API ----
 void storage_open(const StorageConfig *cfg) {
   s_cfg = *cfg;
-  if (s_cfg.record_size > STORAGE_REC_MAX)      s_cfg.record_size = STORAGE_REC_MAX;
-  if (s_cfg.cache_capacity > STORAGE_CACHE_MAX) s_cfg.cache_capacity = STORAGE_CACHE_MAX;
-  if (s_cfg.cache_capacity < 1)                 s_cfg.cache_capacity = 1;
+  if (s_cfg.record_size < 1)               s_cfg.record_size = 1;
+  if (s_cfg.record_size > STORAGE_REC_MAX) s_cfg.record_size = STORAGE_REC_MAX;
+  if (s_cfg.cache_capacity < 1)            s_cfg.cache_capacity = 1;
+
+  // Carve the caller's arena into seq table + cache mirror + page/tx scratch.
+  // Shrink cache_capacity to whatever the arena can actually back so nothing overruns.
+  while (s_cfg.cache_capacity > 1 &&
+         STORAGE_ARENA_BYTES(s_cfg.record_size, s_cfg.cache_capacity) > s_cfg.arena_size)
+    s_cfg.cache_capacity--;
+  uint8_t *p = (uint8_t *)s_cfg.arena;
+  s_seq   = (uint32_t *)p; p += STORAGE_ALIGN4((size_t)s_cfg.cache_capacity * sizeof(uint32_t));
+  s_rec   = p;             p += STORAGE_ALIGN4((size_t)s_cfg.cache_capacity * s_cfg.record_size);
+  s_page  = p;             p += STORAGE_ALIGN4((size_t)s_cfg.cache_capacity * s_cfg.record_size);
+  s_txbuf = p;
 
   load_persisted();
 
@@ -240,7 +249,7 @@ void storage_open(const StorageConfig *cfg) {
   uint32_t smaller = in < out ? in : out;
   s_max_batch = smaller > 96 ? (smaller - 96) / fs : 1;
   if (s_max_batch < 1) s_max_batch = 1;
-  if (s_max_batch > STORAGE_CACHE_MAX) s_max_batch = STORAGE_CACHE_MAX;
+  if (s_max_batch > s_cfg.cache_capacity) s_max_batch = s_cfg.cache_capacity;
 
   connection_service_subscribe((ConnectionHandlers){ .pebble_app_connection_handler = on_connection });
 
@@ -256,10 +265,10 @@ uint32_t storage_append(const void *record) {
   uint8_t newcount = s_count < cap ? s_count + 1 : cap;    // when full, the oldest (synced) slot is dropped
   for (int i = newcount - 1; i > 0; i--) {
     s_seq[i] = s_seq[i - 1];
-    memcpy(s_rec[i], s_rec[i - 1], s_cfg.record_size);
+    memcpy(rec_slot(i), rec_slot(i - 1), s_cfg.record_size);
   }
   s_seq[0] = seq;
-  memcpy(s_rec[0], record, s_cfg.record_size);
+  memcpy(rec_slot(0), record, s_cfg.record_size);
   s_count = newcount;
   save_all();
   notify_state();
@@ -268,7 +277,7 @@ uint32_t storage_append(const void *record) {
 }
 
 uint8_t     storage_cache_count(void)    { return s_count; }
-const void *storage_cache_get(uint8_t i) { return i < s_count ? s_rec[i] : NULL; }
+const void *storage_cache_get(uint8_t i) { return i < s_count ? rec_slot(i) : NULL; }
 
 StorageSyncState storage_state(void)     { return calc_state(); }
 uint16_t         storage_unsynced(void)  { return unsynced_count(); }

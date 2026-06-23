@@ -169,8 +169,9 @@ static void turn_draw(Layer *layer, GContext *ctx) {
   ui_text_draw(ctx, mk_game_player_name(p), UI_FONT_BODY_BOLD, GRect(2, 2, b.size.w - 4, 20),
                GTextAlignmentCenter, false, GTextOverflowModeTrailingEllipsis);
   char sub[40];
-  if (p->score == 0) snprintf(sub, sizeof(sub), "have %d / need %d", p->score, need);
-  else               snprintf(sub, sizeof(sub), "have %d / need %d to hit %d", p->score, need, MK_WIN);
+  snprintf(sub, sizeof(sub), "have %d / need %d", p->score, need);
+  // if (p->score == 0) snprintf(sub, sizeof(sub), "have %d / need %d", p->score, need);
+  // else               snprintf(sub, sizeof(sub), "have %d / need %d to hit %d", p->score, need, MK_WIN);
   ui_text_draw(ctx, sub, UI_FONT_CAPTION, GRect(2, 19, b.size.w - 4, 16),
                GTextAlignmentCenter, false, GTextOverflowModeFill);
 }
@@ -215,6 +216,9 @@ static void turn_load(Window *w) {
     .id = 0, .frame = GRect(2, b.size.h - MISS_H + 2, b.size.w - 4, MISS_H - 6),
     .look = { .style = UI_BTN_SOLID, .scheme = UI_BTN_DANGER,
               .label = "MISS", .font = UI_FONT_TITLE, .radius = 4 },
+    // Focused/pressed: stay danger-red but darken, rather than flipping to the
+    // accent the default emphasis would use.
+    .active_scheme = UI_BTN_DANGER, .active_fill = ui_danger_darker(),
   });
 }
 static void turn_unload(Window *w) {
@@ -245,7 +249,7 @@ static int place_winner_index(void) {
 }
 
 // Section-1 actions, built per-appear since availability depends on game state:
-//   Continue playing      — only when >2 players are still in contention
+//   Continue playing      — only when >1 player is still in contention
 //   Play till end of round — whenever an active player still owes a throw this round
 //   End game               — always
 typedef enum { PLACE_CONTINUE, PLACE_PLAYOUT, PLACE_END } PlaceAct;
@@ -253,7 +257,7 @@ static PlaceAct s_place_acts[3];
 static int      s_place_act_n;
 static void place_build_acts(void) {
   s_place_act_n = 0;
-  if (mk_game_active_count() > 2)      s_place_acts[s_place_act_n++] = PLACE_CONTINUE;
+  if (mk_game_active_count() > 1)      s_place_acts[s_place_act_n++] = PLACE_CONTINUE;
   if (mk_game_round_has_remaining())   s_place_acts[s_place_act_n++] = PLACE_PLAYOUT;
   s_place_acts[s_place_act_n++] = PLACE_END;
 }
@@ -271,8 +275,8 @@ static uint16_t place_rows(MenuLayer *ml, uint16_t s, void *c) {
   place_build_acts();
   return s_place_act_n;
 }
-static int16_t place_h(MenuLayer *ml, MenuIndex *i, void *c) { return i->section == 0 ? 60 : 42; }
-static int16_t place_header_h(MenuLayer *ml, uint16_t s, void *c) { return s == 0 ? 4 : 6; }
+static int16_t place_h(MenuLayer *ml, MenuIndex *i, void *c) { return i->section == 0 ? 50 : 42; }
+static int16_t place_header_h(MenuLayer *ml, uint16_t s, void *c) { return s == 0 ? 0 : 6; }
 static void place_header(GContext *g, const Layer *cl, uint16_t s, void *c) { }  // spacing only
 
 static void place_draw(GContext *ctx, const Layer *cl, MenuIndex *idx, void *c) {
@@ -281,6 +285,9 @@ static void place_draw(GContext *ctx, const Layer *cl, MenuIndex *idx, void *c) 
       menu_cell_basic_draw(ctx, cl, place_act_label(s_place_acts[idx->row]), NULL, NULL);
     return;
   }
+  // The winner is a display-only header, not a selectable row, so draw it on the
+  // plain (unselected) background — never the accent fill, which would make it
+  // look like the highlighted action. place_sel_change keeps selection off it.
   GRect b = layer_get_bounds(cl);
   int wi = place_winner_index();
   if (wi < 0) {                                     // everyone was eliminated — no winner
@@ -291,9 +298,10 @@ static void place_draw(GContext *ctx, const Layer *cl, MenuIndex *idx, void *c) 
   MKGamePlayer *p = &mk_game()->players[wi];
   ui_draw_crown(ctx, GRect(b.origin.x + 8, b.origin.y, 32, b.size.h), p->place, false);
   graphics_context_set_text_color(ctx, ui_text());
-  ui_text_draw(ctx, mk_game_player_name(p), UI_FONT_TITLE, GRect(b.origin.x + 48, b.origin.y + 10, b.size.w - 54, 28),
+  ui_text_draw(ctx, mk_game_player_name(p), UI_FONT_TITLE, GRect(b.origin.x + 48, b.origin.y + 4, b.size.w - 54, 26),
                GTextAlignmentLeft, false, GTextOverflowModeTrailingEllipsis);
-  ui_text_draw(ctx, "reached 50", UI_FONT_CAPTION, GRect(b.origin.x + 48, b.origin.y + 38, b.size.w - 54, 16),
+  graphics_context_set_text_color(ctx, ui_text_muted());
+  ui_text_draw(ctx, "reached 50", UI_FONT_CAPTION, GRect(b.origin.x + 48, b.origin.y + 29, b.size.w - 54, 16),
                GTextAlignmentLeft, false, GTextOverflowModeFill);
 }
 
@@ -311,6 +319,11 @@ static void place_playout(void) {
   mk_game_play_out();                                // finish the round, then the game ends
   window_stack_pop(true);                            // pop placement -> board
 }
+// The winner banner (section 0) is display-only: keep selection on the actions.
+static void place_sel_change(MenuLayer *ml, MenuIndex *new_index, MenuIndex old_index, void *c) {
+  if (new_index->section == 0) { new_index->section = 1; new_index->row = 0; }
+}
+
 static void place_do_select(MenuIndex idx) {
   if (idx.section != 1 || idx.row >= s_place_act_n) return;
   switch (s_place_acts[idx.row]) {
@@ -320,11 +333,16 @@ static void place_do_select(MenuIndex idx) {
   }
 }
 
-// Manual click config so Back can mean "continue".
+// Manual click config: the winner screen never exits on Back — Back instead jumps
+// the cursor to "End game" (always the last action), so a deliberate Select is
+// needed to leave the game.
 static void place_up(ClickRecognizerRef r, void *c) { menu_layer_set_selected_next(s_place_menu, true, MenuRowAlignCenter, true); }
 static void place_down(ClickRecognizerRef r, void *c) { menu_layer_set_selected_next(s_place_menu, false, MenuRowAlignCenter, true); }
 static void place_sel(ClickRecognizerRef r, void *c) { place_do_select(menu_layer_get_selected_index(s_place_menu)); }
-static void place_back(ClickRecognizerRef r, void *c) { place_continue(); }
+static void place_back(ClickRecognizerRef r, void *c) {
+  menu_layer_set_selected_index(s_place_menu, (MenuIndex){ .section = 1, .row = s_place_act_n - 1 },
+                                MenuRowAlignCenter, true);
+}
 static void place_click(void *c) {
   window_single_click_subscribe(BUTTON_ID_UP, place_up);
   window_single_click_subscribe(BUTTON_ID_DOWN, place_down);
@@ -339,6 +357,7 @@ static void place_load(Window *w) {
     .get_num_sections = place_sections, .get_num_rows = place_rows,
     .get_cell_height = place_h, .get_header_height = place_header_h,
     .draw_header = place_header, .draw_row = place_draw,
+    .selection_will_change = place_sel_change,
   });
   menu_layer_set_normal_colors(s_place_menu, ui_background(), ui_text());
   menu_layer_set_highlight_colors(s_place_menu, ui_accent(), ui_accent_text());
@@ -391,5 +410,8 @@ static void result_push(void) {
   int32_t secs = (int32_t)time(NULL) - g->start_time;
   uint16_t duration = (secs > 0) ? (uint16_t)(secs / 60) : 0;
   uint8_t  settings = (mk_lose_on_3() ? MK_SET_LOSE3 : 0) | (mk_final_round() ? MK_SET_FINAL : 0);
-  results_view_push("Results", rows, n, duration, settings, result_leave);
+  char date[24];                                     // the just-finished game is dated "now"
+  time_t now = time(NULL);
+  strftime(date, sizeof date, "%b %d, %H:%M", localtime(&now));
+  results_view_push(date, rows, n, duration, settings, result_leave);
 }

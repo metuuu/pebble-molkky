@@ -56,6 +56,10 @@ typedef struct {
   UiButtonSpec     look;          // base appearance (see button.h)
   UiButtonStyle    active_style;  // emphasis when focused/pressed (default SOLID)
   UiButtonScheme   active_scheme; // emphasis scheme             (default PRIMARY)
+  GColor           active_fill;   // non-clear → override the SOLID fill while
+                                  // focused/pressed (e.g. a danger key darkening
+                                  // to ui_danger_darker instead of flipping hue);
+                                  // clear (default) → the active scheme's fill
   UiButtonBehavior behavior;      // TAP (default) / HOLD / REPEAT
   uint16_t         repeat_ms;     // REPEAT interval (0 => a sane default)
   bool             no_touch;      // exclude from touch hit-testing

@@ -72,6 +72,7 @@ typedef struct {
   Accessory leading;
   Accessory trailing;
   bool      disabled;
+  int8_t    content_dy;     // vertical nudge (px) for the whole row's content
 } ListItem;
 
 // A clean title-only row. Call before filling fields in a get_item callback.

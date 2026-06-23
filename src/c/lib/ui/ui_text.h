@@ -16,13 +16,23 @@ typedef struct {
   int16_t     nudge;  // optical upward correction (GOTHIC pads above the caps)
 } UiFont;
 
-// Presets for the system fonts the app uses. Numbers match the corrections that
-// were previously copy-pasted across draw_centered / list_item / the t9 keyboard.
+// Presets so callers never hand-roll cap/nudge — one coherent Gothic ladder from
+// micro to header. Number/display families (LECO, Bitham, Droid Serif) are left
+// out on purpose: they're single-purpose and their metrics aren't tuned here;
+// add a preset when one earns its keep.
+//
+// cap/nudge for the original five match what draw_centered / list_item / the t9
+// keyboard arrived at; the rest follow the same pattern (cap ≈ size + 4) and are
+// only consulted by ui_text_draw(vcenter=true) — verify centering on first such
+// use of a newly added font.
+extern const UiFont UI_FONT_HEADER;       // GOTHIC_28_BOLD
 extern const UiFont UI_FONT_TITLE;        // GOTHIC_24_BOLD
+extern const UiFont UI_FONT_BODY_LARGE;   // GOTHIC_24 (roomy body / light title)
 extern const UiFont UI_FONT_BODY;         // GOTHIC_18
 extern const UiFont UI_FONT_BODY_BOLD;    // GOTHIC_18_BOLD
 extern const UiFont UI_FONT_CAPTION;      // GOTHIC_14
 extern const UiFont UI_FONT_CAPTION_BOLD; // GOTHIC_14_BOLD (section headers)
+extern const UiFont UI_FONT_MICRO;        // GOTHIC_09
 
 GFont   ui_font(UiFont f);
 int16_t ui_font_cap(UiFont f);          // cap-box height (a row's natural text height)

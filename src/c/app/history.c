@@ -58,7 +58,9 @@ static void open_results(const MKHistGame *g) {
       .misses = r->misses, .throws = r->throws, .points = r->points,
     };
   }
-  results_view_push(d, rows, n, g->duration, g->settings, NULL);
+  // Duration is derived: the record stores absolute start/end, not minutes.
+  uint16_t duration = (g->date > g->start) ? (uint16_t)((g->date - g->start) / 60) : 0;
+  results_view_push(d, rows, n, duration, g->settings, NULL);
 }
 
 static void fill_game_row(ListItem *out, const MKHistGame *g) {

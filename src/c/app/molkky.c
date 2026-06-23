@@ -1,10 +1,17 @@
 #include "molkky.h"
 #include "c/lib/storage/storage.h"
+#include "c/lib/ui/menu.h"
 
 // The store keeps one record per persist slot; keep MKHistGame within the lib's
-// ceiling and 4-byte aligned (so cache slots stay aligned — see storage.c).
+// per-record ceiling and 4-byte aligned (so cache slots stay aligned — see storage.c).
 _Static_assert(sizeof(MKHistGame) <= STORAGE_REC_MAX, "MKHistGame exceeds STORAGE_REC_MAX");
 _Static_assert(sizeof(MKHistGame) % 4 == 0,           "MKHistGame must be 4-byte aligned");
+
+// Caller-owned backing memory for the synced history store (RAM cache + send/page
+// scratch). The storage lib carries no fixed cache; we hand it a buffer sized to
+// exactly the window this app keeps. 4-byte aligned for word-aligned record readback.
+static uint8_t s_store_arena[STORAGE_ARENA_BYTES(sizeof(MKHistGame), MK_MAX_HISTORY)]
+    __attribute__((aligned(4)));
 
 // Persist keys — start at 100 to avoid the keyboard's settings keys (1-9).
 #define PK_ROSTER     100     // roster header + first ROSTER_K1 entries
@@ -15,6 +22,9 @@ _Static_assert(sizeof(MKHistGame) % 4 == 0,           "MKHistGame must be 4-byte
 #define PK_SCHEMA     105     // persisted-format version (see migrate_persist)
 #define PK_ROSTER2    106     // roster entries ROSTER_K1 .. MK_MAX_PLAYERS-1
 #define PK_FINAL_RND  107     // "final round" (shared crowns) setting
+#define PK_SHOW_HDR   136     // "show header" (menu title + clock bar) setting
+#define PK_STATS      108     // lifetime stats, slots 0 .. ROSTER_K1-1 (parallel to roster)
+#define PK_STATS2     109     // lifetime stats, slots ROSTER_K1 .. MK_MAX_PLAYERS-1
 #define PK_HIST_0     110     // legacy: pre-v4 history games at 110 .. 110+24
 #define MK_HIST_LEGACY_SLOTS 25   // pre-v4 history held up to 25 games (PK_HIST_0 .. +24)
 #define PK_STORE_BASE 150     // synced history store: header at 150, slots 151 .. 151+MK_MAX_HISTORY-1
@@ -38,7 +48,11 @@ _Static_assert(sizeof(MKHistGame) % 4 == 0,           "MKHistGame must be 4-byte
 //     record changes the store's layout, so the on-watch cache resets (the phone
 //     archive is intentionally not migrated — old records are abandoned); the
 //     in-progress game is discarded for the new GameHdr.
-#define MK_SCHEMA     6
+// v7: history records store the absolute start time instead of a minute duration
+//     (duration is derived on display); the watch now keeps per-player lifetime
+//     stats (PK_STATS/PK_STATS2). The record layout changed again, so the cache
+//     resets and the phone archive is abandoned (unreleased app — no migration).
+#define MK_SCHEMA     7
 
 // A roster entry. `id` is stable for the player's lifetime and never reused, so
 // history can reference a player by id and still show the right (current) name —
@@ -69,10 +83,12 @@ typedef struct { uint8_t count, current, group_base; bool finishing, playout, fi
                  int32_t start; } GameHdr;
 
 static MKRosterEntry s_roster[MK_MAX_PLAYERS];
+static MKLifetime    s_lifetime[MK_MAX_PLAYERS];  // parallel to s_roster, by slot
 static int           s_roster_count;   // active + archived (total entries)
 static uint8_t       s_next_id = 1;    // 0 is reserved as "no player"
 static bool       s_lose_on_3 = true;
 static bool       s_final_round = false;
+static bool       s_show_header = false;
 static MKGame     s_game;
 static bool       s_game_active;
 static MKGame     s_undo;          // pre-throw snapshot for one-level undo (RAM only)
@@ -121,8 +137,16 @@ static uint8_t roster_new_id(void) {
   return id;
 }
 static void roster_remove_slot(int s) {
-  for (int k = s; k < s_roster_count - 1; k++) s_roster[k] = s_roster[k + 1];
+  for (int k = s; k < s_roster_count - 1; k++) {
+    s_roster[k]   = s_roster[k + 1];
+    s_lifetime[k] = s_lifetime[k + 1];   // lifetime stats are parallel by slot
+  }
   s_roster_count--;
+}
+static int slot_by_id(uint8_t id) {
+  if (id == 0) return -1;
+  for (int s = 0; s < s_roster_count; s++) if (s_roster[s].id == id) return s;
+  return -1;
 }
 
 // ---- persistence helpers ----
@@ -134,6 +158,14 @@ static void roster_save(void) {
   persist_write_data(PK_ROSTER, &h, sizeof(h));
   persist_write_data(PK_ROSTER2, s_roster + ROSTER_K1,      // entries ROSTER_K1 ..
                      sizeof(MKRosterEntry) * (MK_MAX_PLAYERS - ROSTER_K1));
+}
+static void stats_save(void) {
+  // Split like the roster: 16 * 18 B = 288 B would exceed the 256-byte per-value
+  // limit, so the first ROSTER_K1 entries go in PK_STATS, the rest in PK_STATS2.
+  persist_write_data(PK_STATS,  s_lifetime,
+                     sizeof(MKLifetime) * ROSTER_K1);
+  persist_write_data(PK_STATS2, s_lifetime + ROSTER_K1,
+                     sizeof(MKLifetime) * (MK_MAX_PLAYERS - ROSTER_K1));
 }
 static void game_save(void) {
   if (!s_game_active) return;
@@ -211,6 +243,12 @@ static void migrate_persist(int from) {
     persist_delete(PK_GAME_HDR);
     persist_delete(PK_GAME_PLRS);
   }
+  if (from < 7) {
+    // The history record layout changed (start time replaces duration), so the
+    // store resets its cache on the size mismatch; the in-progress game is
+    // unaffected (GameHdr is unchanged) but lifetime stats start empty. Nothing
+    // to migrate — PK_STATS/PK_STATS2 simply don't exist yet and read as zero.
+  }
 }
 
 // Move pre-v4 on-watch history (PK_HIST_CNT + PK_HIST_0..) into the storage lib.
@@ -260,8 +298,20 @@ void mk_init(void) {
     s_next_id = 1;
   }
 
+  // Lifetime stats, parallel to the roster. Absent keys (fresh install / older
+  // schema) leave the all-zero default, so every player starts with no games.
+  memset(s_lifetime, 0, sizeof(s_lifetime));
+  if (persist_exists(PK_STATS))
+    persist_read_data(PK_STATS,  s_lifetime,
+                      sizeof(MKLifetime) * ROSTER_K1);
+  if (persist_exists(PK_STATS2))
+    persist_read_data(PK_STATS2, s_lifetime + ROSTER_K1,
+                      sizeof(MKLifetime) * (MK_MAX_PLAYERS - ROSTER_K1));
+
   s_lose_on_3 = persist_exists(PK_SETTINGS) ? persist_read_bool(PK_SETTINGS) : true;
   s_final_round = persist_exists(PK_FINAL_RND) ? persist_read_bool(PK_FINAL_RND) : false;
+  s_show_header = persist_exists(PK_SHOW_HDR) ? persist_read_bool(PK_SHOW_HDR) : false;
+  menu_set_header_enabled(s_show_header);
 
   // Open the synced history store. The watch keeps the newest MK_MAX_HISTORY
   // games as an offline cache; the phone holds the full archive.
@@ -270,6 +320,8 @@ void mk_init(void) {
     .cache_capacity = MK_MAX_HISTORY,
     .schema         = MK_SCHEMA,
     .base_key       = PK_STORE_BASE,
+    .arena          = s_store_arena,
+    .arena_size     = sizeof(s_store_arena),
     .on_page        = store_on_page,
     .on_state       = store_on_state,
   });
@@ -300,12 +352,14 @@ const char *mk_roster_name(int i) {
 }
 bool mk_roster_add(const char *name) {
   if (!name || !name[0] || s_roster_count >= MK_MAX_PLAYERS) return false;
-  MKRosterEntry *e = &s_roster[s_roster_count++];
+  int slot = s_roster_count++;
+  MKRosterEntry *e = &s_roster[slot];
   strncpy(e->name, name, MK_MAX_NAME - 1);
   e->name[MK_MAX_NAME - 1] = '\0';
   e->id = roster_new_id();
   e->archived = false;
-  roster_save(); return true;
+  memset(&s_lifetime[slot], 0, sizeof(MKLifetime));   // a new player starts at zero
+  roster_save(); stats_save(); return true;
 }
 void mk_roster_rename(int i, const char *name) {
   int s = active_slot(i);
@@ -316,7 +370,7 @@ void mk_roster_rename(int i, const char *name) {
 void mk_roster_delete(int i) {
   int s = active_slot(i);
   if (s < 0) return;
-  roster_remove_slot(s); roster_save();
+  roster_remove_slot(s); roster_save(); stats_save();   // drops the player's lifetime stats
 }
 void mk_roster_archive(int i) {
   int s = active_slot(i);
@@ -342,7 +396,7 @@ void mk_roster_unarchive(int j) {
 void mk_roster_archived_delete(int j) {
   int s = archived_slot(j);
   if (s < 0) return;
-  roster_remove_slot(s); roster_save();
+  roster_remove_slot(s); roster_save(); stats_save();   // drops the player's lifetime stats
 }
 
 const char *mk_name_by_id(uint8_t id) {
@@ -352,11 +406,46 @@ const char *mk_name_by_id(uint8_t id) {
   return NULL;
 }
 
+// ---- lifetime stats ----
+int         mk_stats_count(void)      { return mk_roster_count(); }   // active players
+const char *mk_stats_name(int i)      { return mk_roster_name(i); }
+const MKLifetime *mk_stats_get(int i) {
+  int s = active_slot(i);
+  return s >= 0 ? &s_lifetime[s] : NULL;
+}
+
+// Fold a finished game's per-player figures into the lifetime totals. Counts
+// every player (not just the MK_MAX_HIST_PLAYERS that fit a history record), and
+// uses the wide in-game counters before they saturate into the narrow record.
+// A player deleted mid-game (no roster slot) is skipped. Saturates rather than
+// wraps so a very long-lived total never rolls over.
+static void stats_record_game(const MKGame *g) {
+  for (int i = 0; i < g->count; i++) {
+    const MKGamePlayer *p = &g->players[i];
+    int s = slot_by_id(p->id);
+    if (s < 0) continue;
+    MKLifetime *L = &s_lifetime[s];
+    if (L->games < 0xFFFF) L->games++;
+    if (p->place == 1 && L->wins < 0xFFFF) L->wins++;
+    if (L->throws <= 0xFFFFFFFFu - p->throws)       L->throws += p->throws;       else L->throws = 0xFFFFFFFFu;
+    if (L->misses <= 0xFFFFFFFFu - p->total_misses) L->misses += p->total_misses; else L->misses = 0xFFFFFFFFu;
+    if (L->points <= 0xFFFFFFFFu - p->points)       L->points += p->points;       else L->points = 0xFFFFFFFFu;
+    if (L->place_sum <= 0xFFFF - p->place)          L->place_sum += p->place;     else L->place_sum = 0xFFFF;
+  }
+  stats_save();
+}
+
 // ---- settings ----
 bool mk_lose_on_3(void) { return s_lose_on_3; }
 void mk_set_lose_on_3(bool v) { s_lose_on_3 = v; persist_write_bool(PK_SETTINGS, v); }
 bool mk_final_round(void) { return s_final_round; }
 void mk_set_final_round(bool v) { s_final_round = v; persist_write_bool(PK_FINAL_RND, v); }
+bool mk_show_header(void) { return s_show_header; }
+void mk_set_show_header(bool v) {
+  s_show_header = v;
+  persist_write_bool(PK_SHOW_HDR, v);
+  menu_set_header_enabled(v);
+}
 
 // ---- game ----
 bool mk_game_active(void) { return s_game_active && !s_game.finished; }
@@ -521,10 +610,9 @@ bool mk_game_undo(void) {
 
 static void hist_add(const MKGame *g) {
   MKHistGame hg;
-  int32_t now = (int32_t)time(NULL);
-  hg.date = now;
-  int32_t secs = now - g->start_time;
-  hg.duration = (secs > 0) ? (uint16_t)(secs / 60) : 0;       // backwards clock → 0; wraps past ~45 d
+  hg.date  = (int32_t)time(NULL);
+  hg.start = g->start_time;                                   // duration is derived on display
+  hg._pad[0] = hg._pad[1] = 0;                                // deterministic record bytes
   hg.settings = (mk_lose_on_3() ? MK_SET_LOSE3 : 0) |
                 (mk_final_round() ? MK_SET_FINAL : 0);
 
@@ -588,6 +676,7 @@ void mk_game_end(void) {
   }
   g->finished = true;
   hist_add(g);
+  stats_record_game(g);     // fold this game into the players' lifetime totals
   s_game_active = false;
   game_clear_persist();
 }

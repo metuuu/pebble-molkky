@@ -12,6 +12,7 @@
 #define PKEY_DELRPT_WD  9
 #define PKEY_HAPTIC_MS  10
 #define PKEY_RESPECT_APP 11   // bool: use the app's theme over the global pick
+#define PKEY_FLAT       12    // bool: draw keys flat instead of 3D-raised
 
 static const int WAIT_PRESETS[] = { 300, 400, 500, 600, 800, 1000, 1200 };
 #define NUM_WAIT (int)(sizeof(WAIT_PRESETS) / sizeof(WAIT_PRESETS[0]))
@@ -49,7 +50,7 @@ static void settings_load(T9Settings *s) {
   s->two_space_period = persist_exists(PKEY_DBLSPACE)
                         ? persist_read_bool(PKEY_DBLSPACE) : false;
   s->haptics = persist_exists(PKEY_HAPTICS)
-               ? persist_read_bool(PKEY_HAPTICS) : true;
+               ? persist_read_bool(PKEY_HAPTICS) : false;
   s->delete_mode = persist_exists(PKEY_DELMODE) ? persist_read_int(PKEY_DELMODE) : 0;
   s->del_repeat_chars_ms = persist_exists(PKEY_DELRPT_CH)
                            ? persist_read_int(PKEY_DELRPT_CH) : 100;
@@ -57,6 +58,8 @@ static void settings_load(T9Settings *s) {
                            ? persist_read_int(PKEY_DELRPT_WD) : 250;
   s->haptic_ms = persist_exists(PKEY_HAPTIC_MS)
                  ? persist_read_int(PKEY_HAPTIC_MS) : 20;
+  s->flat_keys = persist_exists(PKEY_FLAT)
+                 ? persist_read_bool(PKEY_FLAT) : false;
 }
 
 static void settings_save(const T9Settings *s) {
@@ -68,6 +71,7 @@ static void settings_save(const T9Settings *s) {
   persist_write_int(PKEY_DELRPT_CH, s->del_repeat_chars_ms);
   persist_write_int(PKEY_DELRPT_WD, s->del_repeat_words_ms);
   persist_write_int(PKEY_HAPTIC_MS, s->haptic_ms);
+  persist_write_bool(PKEY_FLAT, s->flat_keys);
 }
 
 static void ext_save(T9Keyboard *kb) {
@@ -143,6 +147,18 @@ static void haptic_cycle_next(T9Settings *s) {
   s->haptic_ms = HAPTIC_PRESETS[(idx + 1) % NUM_HAPTIC];
 }
 
+// ---- Theming ----------------------------------------------------------------
+
+// Paint a settings menu + its window in the keyboard's currently-active theme,
+// so the settings UI previews the skin the user is choosing. Highlight uses the
+// accent strip (the same pairing the keyboard's function row draws).
+static void theme_menu(MenuLayer *menu, Window *window) {
+  UiTheme t = t9_keyboard_get_theme_colors(s_kb);
+  menu_layer_set_normal_colors(menu, t.background, t.text);
+  menu_layer_set_highlight_colors(menu, t.accent, t.accent_text);
+  if (window) window_set_background_color(window, t.background);
+}
+
 // ---- MenuLayer callbacks ----------------------------------------------------
 
 // Logical rows, in display order. The "App theme" row only appears when the
@@ -150,7 +166,7 @@ static void haptic_cycle_next(T9Settings *s) {
 // row by skipping R_APPTHEME when there is none — every callback switches on the
 // logical row, so adding/reordering rows stays a one-line change here.
 typedef enum {
-  R_WAIT = 0, R_AUTOCAP, R_DBLSPACE, R_SPECIAL, R_THEME, R_APPTHEME,
+  R_WAIT = 0, R_AUTOCAP, R_DBLSPACE, R_SPECIAL, R_THEME, R_APPTHEME, R_KEYSTYLE,
   R_HAPTICS, R_HAPTIC_MS, R_DELETE, R_DELSPEED, R_HELP, R_MAX
 } SRow;
 
@@ -180,7 +196,7 @@ static void prv_draw_row(GContext *ctx, const Layer *cell, MenuIndex *idx, void 
       snprintf(sub, sizeof(sub), "%s", s_settings.two_space_period ? "On" : "Off");
       break;
     case R_SPECIAL: {
-      title = "Special characters";
+      title = "Nordic letters";
       int n = t9_keyboard_ext_count(), on = 0;
       for (int i = 0; i < n; i++) if (t9_keyboard_ext_enabled(s_kb, i)) on++;
       snprintf(sub, sizeof(sub), "%s", (on == n) ? "On" : (on == 0) ? "Off" : "Mixed");
@@ -191,10 +207,14 @@ static void prv_draw_row(GContext *ctx, const Layer *cell, MenuIndex *idx, void 
       snprintf(sub, sizeof(sub), "%s", t9_keyboard_theme_name(s_global_theme));
       break;
     case R_APPTHEME:   // on -> show the app's theme name; off -> the global pick wins
-      title = "App theme";
+      title = "Use app theme";
       snprintf(sub, sizeof(sub), "%s",
                s_respect_app ? t9_keyboard_theme_name(t9_keyboard_app_theme_index())
                              : "Off");
+      break;
+    case R_KEYSTYLE:
+      title = "Key style";
+      snprintf(sub, sizeof(sub), "%s", s_settings.flat_keys ? "Flat" : "3D");
       break;
     case R_HAPTICS:
       title = "Haptics";
@@ -228,6 +248,7 @@ static void prv_select(MenuLayer *ml, MenuIndex *idx, void *c) {
   switch (srow(idx->row)) {
     case R_WAIT: wait_cycle_next(&s_settings); break;
     case R_AUTOCAP: s_settings.auto_caps = !s_settings.auto_caps; break;
+    case R_KEYSTYLE: s_settings.flat_keys = !s_settings.flat_keys; break;  // 3D <-> flat
     case R_DBLSPACE: s_settings.two_space_period = !s_settings.two_space_period; break;
     case R_HAPTICS: s_settings.haptics = !s_settings.haptics; break;
     case R_HAPTIC_MS: haptic_cycle_next(&s_settings); break;  // pulse length
@@ -239,12 +260,14 @@ static void prv_select(MenuLayer *ml, MenuIndex *idx, void *c) {
       s_global_theme = (s_global_theme + 1) % t9_keyboard_theme_count();
       persist_write_int(PKEY_THEME, s_global_theme);
       theme_apply(s_kb);   // no visible change while the app theme is respected
+      theme_menu(s_menu, s_window);
       menu_layer_reload_data(s_menu);
       return;
     case R_APPTHEME:                              // use app theme vs. global pick
       s_respect_app = !s_respect_app;
       persist_write_bool(PKEY_RESPECT_APP, s_respect_app);
       theme_apply(s_kb);
+      theme_menu(s_menu, s_window);
       menu_layer_reload_data(s_menu);
       return;
     default: break;
@@ -266,6 +289,7 @@ static void prv_window_load(Window *window) {
     .select_click = prv_select,
   });
   menu_layer_set_click_config_onto_window(s_menu, window);
+  theme_menu(s_menu, window);
   layer_add_child(root, menu_layer_get_layer(s_menu));
 }
 
@@ -323,6 +347,7 @@ static void prv_char_window_load(Window *window) {
     .select_click = prv_char_select,
   });
   menu_layer_set_click_config_onto_window(s_char_menu, window);
+  theme_menu(s_char_menu, window);
   layer_add_child(root, menu_layer_get_layer(s_char_menu));
 }
 
@@ -363,9 +388,9 @@ static const char *HELP_TEXT =
   "SPECIAL LETTERS\n"
   "Letters like a and o cycle to a A a A a. Turn them on or off in Settings.\n\n"
   "BUTTONS\n"
-  "Up: switch layout (hold for Settings)\n"
+  "Up: settings\n"
   "OK: enter (hold for a new line)\n"
-  "Down: backspace, hold to repeat (delete by letter or word in Settings)\n"
+  "Down: switch layout (hold to delete, by letter or word in Settings)\n"
   "Back: go back";
 
 static void prv_help_window_load(Window *window) {
@@ -375,10 +400,15 @@ static void prv_help_window_load(Window *window) {
   s_help_scroll = scroll_layer_create(bounds);
   scroll_layer_set_click_config_onto_window(s_help_scroll, window);
 
+  UiTheme t = t9_keyboard_get_theme_colors(s_kb);
+  window_set_background_color(window, t.background);
+
   s_help_text = text_layer_create(GRect(4, 0, bounds.size.w - 8, 2000));
   text_layer_set_text(s_help_text, HELP_TEXT);
   text_layer_set_font(s_help_text, fonts_get_system_font(FONT_KEY_GOTHIC_18));
   text_layer_set_overflow_mode(s_help_text, GTextOverflowModeWordWrap);
+  text_layer_set_background_color(s_help_text, GColorClear);
+  text_layer_set_text_color(s_help_text, t.text);
 
   GSize used = text_layer_get_content_size(s_help_text);
   text_layer_set_size(s_help_text, GSize(bounds.size.w - 8, used.h + 8));

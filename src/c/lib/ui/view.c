@@ -1,5 +1,6 @@
 #include "view.h"
 #include "ui_theme.h"
+#include "ui_section.h"
 
 #define VIEW_ICON_CACHE 8
 #define VIEW_BUILD_CAP  32       // block buffer for dynamic (build) views
@@ -74,11 +75,11 @@ static GBitmap *view_icon(void *ctx, uint32_t res) {
 }
 
 // --- per-block geometry ------------------------------------------------------
-static int16_t section_h(void)        { return 24; }
+static int16_t section_h(void)        { return ui_section_height(false); }  // view spaces sections itself
 static int16_t field_h(const Block *b) {
   if (b->field.stacked)
-    return 4 + ui_font_cap(UI_FONT_BODY_BOLD) + 2 + ui_font_cap(UI_FONT_CAPTION) + 4;
-  return 6 + ui_font_cap(UI_FONT_BODY) + 6;
+    return 4 + ui_font_cap(UI_FONT_TITLE) - 2 + ui_font_cap(UI_FONT_BODY_LARGE) + 4;
+  return 3 + ui_font_cap(UI_FONT_TITLE) + 3;
 }
 static int16_t block_h(View *v, const Block *b) {
   switch (b->kind) {
@@ -93,29 +94,26 @@ static int16_t block_h(View *v, const Block *b) {
 
 // --- drawing -----------------------------------------------------------------
 static void draw_section(GContext *ctx, const char *title, GRect r) {
-  graphics_context_set_text_color(ctx, ui_text());
-  ui_text_draw(ctx, title, UI_FONT_CAPTION_BOLD,
-               GRect(r.origin.x + LPAD, r.origin.y, r.size.w - 2 * LPAD, r.size.h),
-               GTextAlignmentLeft, true, GTextOverflowModeFill);
+  ui_section_draw(ctx, r, title, false);
 }
 static void draw_field(GContext *ctx, const Block *b, GRect r) {
   int x = r.origin.x + LPAD, w = r.size.w - 2 * LPAD;
   if (b->field.stacked) {
-    int lc = ui_font_cap(UI_FONT_BODY_BOLD);
+    int lc = ui_font_cap(UI_FONT_TITLE);
     graphics_context_set_text_color(ctx, ui_text());
-    ui_text_draw(ctx, b->field.label, UI_FONT_BODY_BOLD,
+    ui_text_draw(ctx, b->field.label, UI_FONT_TITLE,
                  GRect(x, r.origin.y + 4, w, lc),
                  GTextAlignmentLeft, false, GTextOverflowModeTrailingEllipsis);
     graphics_context_set_text_color(ctx, ui_text_muted());
-    ui_text_draw(ctx, b->field.value, UI_FONT_CAPTION,
-                 GRect(x, r.origin.y + 4 + lc + 2, w, ui_font_cap(UI_FONT_CAPTION)),
+    ui_text_draw(ctx, b->field.value, UI_FONT_BODY_LARGE,
+                 GRect(x, r.origin.y + 4 + lc - 2, w, ui_font_cap(UI_FONT_BODY_LARGE)),
                  GTextAlignmentLeft, false, GTextOverflowModeTrailingEllipsis);
   } else {                                            // inline: label left, value right
     graphics_context_set_text_color(ctx, ui_text());
-    ui_text_draw(ctx, b->field.label, UI_FONT_BODY, GRect(x, r.origin.y, w, r.size.h),
+    ui_text_draw(ctx, b->field.label, UI_FONT_BODY_LARGE, GRect(x, r.origin.y, w, r.size.h),
                  GTextAlignmentLeft, true, GTextOverflowModeTrailingEllipsis);
     graphics_context_set_text_color(ctx, ui_text());
-    ui_text_draw(ctx, b->field.value, UI_FONT_BODY_BOLD, GRect(x, r.origin.y, w, r.size.h),
+    ui_text_draw(ctx, b->field.value, UI_FONT_TITLE, GRect(x, r.origin.y, w, r.size.h),
                  GTextAlignmentRight, true, GTextOverflowModeTrailingEllipsis);
   }
 }

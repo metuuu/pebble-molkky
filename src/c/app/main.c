@@ -84,17 +84,15 @@ static void init(void) {
   // once here so both libs stay generic. The keyboard's app theme is its default
   // unless the user turns "Mölkky" off in keyboard settings (then their own pick
   // applies); the ui accent colors menu selection and checkboxes app-wide.
-  t9_keyboard_set_app_theme(&(T9Theme){
-    .name = "Mölkky",
-    .bg = GColorWhite, .fg = GColorBlack, .key = GColorLightGray,
-    .accent = MK_ACCENT, .accent_text = GColorWhite,
-    .danger = GColorDarkCandyAppleRed, .danger_light = GColorMelon,
-  });
   ui_theme_set((UiTheme){
     .background = GColorWhite, .text = GColorBlack, .text_muted = GColorDarkGray,
     .neutral = GColorLightGray, .accent = MK_ACCENT, .accent_text = GColorWhite,
-    .danger = GColorDarkCandyAppleRed, .danger_light = GColorMelon,
+    // danger tokens left unset → the lib's built-in red ramp (DarkCandyAppleRed
+    // / Melon / BulgarianRose).
   });
+  // Brand the keyboard from the same palette — no colors duplicated here. Its
+  // "Mölkky" skin is one pick alongside the keyboard's built-in themes.
+  t9_keyboard_set_app_theme("Mölkky", ui_theme_get());
   s_menu = menu_push("Mölkky", (MenuConfig) {
     .get_count = menu_count, .get_item = menu_item, .on_select = menu_select,
   });

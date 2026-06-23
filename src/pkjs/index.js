@@ -6,6 +6,8 @@
 // =============================================================================
 
 var Store = require('./storage');
+var histView = require('./molkky_history');
+var configPage = require('./config_page');
 
 // One archive for Mölkky's game history. The prefix namespaces its localStorage
 // keys, so adding more synced stores later is just another `new Store(...)`.
@@ -17,4 +19,34 @@ Pebble.addEventListener('ready', function () {
 
 Pebble.addEventListener('appmessage', function (e) {
   history.handle(e.payload);
+});
+
+// ---- settings webview (gear icon in the Core Devices app) -------------------
+// Opens a self-contained page showing the stored games and offering export /
+// import. See config_page.js. Requires "configurable" in package.json
+// capabilities for the gear to appear.
+Pebble.addEventListener('showConfiguration', function () {
+  var snap = history.snapshot();
+  var archive = histView.decodeArchive(snap);
+  var decoded = JSON.stringify(archive, null, 2);
+  var stats = JSON.stringify(histView.aggregatePlayers(archive));
+  var raw = JSON.stringify(snap);
+  Pebble.openURL(configPage.buildUrl(decoded, raw, stats, snap.records.length));
+});
+
+Pebble.addEventListener('webviewclosed', function (e) {
+  if (!e || !e.response) return;
+  var res;
+  try { res = JSON.parse(decodeURIComponent(e.response)); }
+  catch (err) { console.log('config: bad response'); return; }
+  if (res.action !== 'import') return;          // "Done"/back: nothing to do
+  var snap;
+  try { snap = JSON.parse(res.raw); }
+  catch (err) { console.log('import: not valid JSON'); return; }
+  try {
+    var n = history.restore(snap, res.mode === 'replace' ? 'replace' : 'merge');
+    console.log('import (' + res.mode + '): archive now ' + n + ' game(s)');
+  } catch (err) {
+    console.log('import failed: ' + err.message);
+  }
 });

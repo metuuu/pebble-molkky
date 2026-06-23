@@ -40,15 +40,16 @@ typedef struct {
   UiFont         font;     // font for `label` (unused without a label)
   GBitmap       *icon;     // NULL for none; caller-owned, tinted to the ink
   int16_t        radius;   // corner radius for SOLID/OUTLINE (0 = square)
+  GColor         border;   // SOLID only: non-clear → hairline-stroke the face in
+                           // this color (clear = no border, the default)
 
-  // "3D" raised look (color-free press feedback). With elevation > 0 the button
-  // casts a bottom-right drop shadow at rest and, when `pressed`, sinks by
-  // `elevation` px into where the shadow sat — reading as "pushed in" without
-  // changing any color. The shadow is SOLID-only (a hollow border casts none);
-  // the sink applies to whatever the button draws. Both default to 0/false, so a
-  // button that ignores them stays perfectly flat as before.
+  // "3D" raised look. With elevation > 0 the button casts a bottom-right drop
+  // shadow at rest and, when `pressed`, sinks by `elevation` px into where the
+  // shadow sat AND fills with the shadow shade — reading as "pushed down into
+  // its own dark recess." The shadow is SOLID-only (a hollow border casts none).
+  // Both default to 0/false, so a button that ignores them stays flat as before.
   int16_t        elevation;  // shadow depth / press travel in px (0 = flat)
-  bool           pressed;    // true → sunk into the shadow
+  bool           pressed;    // true → sunk into the shadow, filled with it
 
   // Escape hatch: a non-clear color here overrides the themed fill / ink for
   // this one draw. Left GColorClear (the zero value), the scheme's color wins.

@@ -104,6 +104,6 @@
         }
       ]
     },
-    "capabilities": []
+    "capabilities": ["configurable"]
   }
 }

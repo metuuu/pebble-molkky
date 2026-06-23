@@ -1,5 +1,6 @@
 #pragma once
 #include <pebble.h>
+#include "c/lib/ui/ui_theme.h"   // the app-brand keyboard skin is a UiTheme
 
 // =============================================================================
 // t9_keyboard — a Nokia-style multi-tap on-screen keyboard for PebbleOS
@@ -40,6 +41,7 @@ typedef struct {
   int  delete_mode;        // 0 = characters, 1 = words
   int  del_repeat_chars_ms;// hold-to-repeat interval in characters mode
   int  del_repeat_words_ms;// hold-to-repeat interval in words mode
+  bool flat_keys;          // draw keys flat (no 3D raise/shadow); darken on press
 } T9Settings;
 
 // Fired by t9_keyboard_submit(). `text` is only valid during the callback.
@@ -55,9 +57,28 @@ Layer *t9_keyboard_get_layer(T9Keyboard *kb);
 // Single entry point for touch input (layer-local coordinates).
 void t9_keyboard_handle_tap(T9Keyboard *kb, GPoint point);
 
+// Press feedback while a finger is down, independent of the tap/hold action that
+// fires on liftoff. The touch driver calls _touch_down on touchdown so the key
+// under the finger draws pressed immediately, and _touch_up on liftoff to release
+// it. A point off the grid clears the highlight. Purely visual: neither types nor
+// commits anything (the typed glyph is still decided by handle_tap/handle_hold).
+void t9_keyboard_handle_touch_down(T9Keyboard *kb, GPoint point);
+void t9_keyboard_handle_touch_up(T9Keyboard *kb);
+
+// Cell index under `point`, or -1 off the grid. The touch driver compares this to
+// the touchdown cell to cancel the tap/long-press once a finger slides off it.
+int t9_keyboard_key_at_point(T9Keyboard *kb, GPoint point);
+
 // Long-press at a point: char keys / space insert their keypad digit
 // (key 0..8 -> 1..9, space -> 0); the bottom-left key cycles the layout.
+// DEL is the exception: the touch driver should NOT route a DEL hold here (that
+// would erase just once). Use t9_keyboard_point_is_delete() to detect it and
+// drive a repeating t9_keyboard_backspace() instead — see t9_keyboard_window.c.
 void t9_keyboard_handle_hold(T9Keyboard *kb, GPoint point);
+
+// True when `point` lands on the DEL key, so the touch driver can give it
+// hold-to-repeat erase (like the Down button) rather than a one-shot hold.
+bool t9_keyboard_point_is_delete(T9Keyboard *kb, GPoint point);
 
 // Programmatic actions — handy for wiring physical buttons.
 void t9_keyboard_backspace(T9Keyboard *kb);
@@ -99,22 +120,24 @@ const char *t9_keyboard_theme_name(int index);
 int  t9_keyboard_get_theme(T9Keyboard *kb);
 void t9_keyboard_set_theme(T9Keyboard *kb, int index);
 
-// An app-supplied color theme — your app's brand palette, so the lib needn't
-// hardcode any app's colors. `accent` fills the function row and lights up
-// pressed keys; `accent_text` is the text drawn on it, so pick `accent` dark
-// enough (or `accent_text` light enough) to stay legible. `danger_light` fills
-// the DEL key and `danger` tints its delete glyph, so the destructive key reads
-// apart from the accent strip — keep `danger` legible on `danger_light`. `name`
-// shows in the picker and must outlive the keyboard (use a string literal).
-typedef struct {
-  const char *name;
-  GColor bg, fg, key, accent, accent_text, danger, danger_light;
-} T9Theme;
+// The colors of the keyboard's CURRENTLY-ACTIVE theme, packed as a UiTheme so a
+// host surface (e.g. the on-watch settings menu) can paint itself to match the
+// live keyboard skin. Reflects whatever is actually applied — built-in pick or
+// app skin — not merely an index. The keyboard's "key" fill maps to `neutral`;
+// it has no muted-ink role, so `text_muted` mirrors `text`.
+UiTheme t9_keyboard_get_theme_colors(T9Keyboard *kb);
 
-// Register or replace the app's custom theme: a single shared slot appended
-// after the built-ins, addressed as theme index t9_keyboard_theme_count().
-// The struct is copied (the `name` pointer is kept as-is). Pass NULL to clear.
-// Call once at startup, before any keyboard window is shown.
-void t9_keyboard_set_app_theme(const T9Theme *theme);
+// Register the app-brand keyboard skin from your app's shared ui palette, so the
+// brand colors live in ONE place (the UiTheme) instead of being duplicated here.
+// It appends a single pickable theme after the built-ins, addressed as theme
+// index t9_keyboard_theme_count(). The mapping onto the keyboard's roles:
+//   background -> screen      accent      -> function row / active keys
+//   text       -> ink/divider accent_text -> ink on the accent
+//   neutral    -> resting key fill        danger/danger_light -> the DEL key
+// The keyboard has no "key fill" token of its own, so `neutral` plays that role.
+// Pass a typical `ui_theme_get()`. `name` shows in the picker and must outlive
+// the keyboard (use a string literal). Call once at startup, before any keyboard
+// window is shown; pass name=NULL to clear the slot.
+void t9_keyboard_set_app_theme(const char *name, UiTheme theme);
 bool t9_keyboard_has_app_theme(void);
 int  t9_keyboard_app_theme_index(void);   // index for set_theme(), or -1 if none

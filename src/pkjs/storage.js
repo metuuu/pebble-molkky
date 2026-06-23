@@ -120,6 +120,51 @@ Store.prototype._sendAck = function () {
 
 // Offset paging over the global newest-first list. The watch always syncs before
 // fetching, so by here the archive is complete and a page is a pure offset slice.
+// ---- backup / restore (generic, opaque) ------------------------------------
+// snapshot() and restore() are the canonical export/import format: records stay
+// opaque (the same base64 we hold), keyed by seq, so a round-trip is lossless
+// and this stays decoupled from any record's byte layout. An app that wants a
+// human-readable view decodes the records on top of snapshot() (see
+// molkky_history.js) without this layer needing to know the struct.
+
+// Whole-archive snapshot. Shape mirrors what restore() consumes.
+Store.prototype.snapshot = function () {
+  var seqs = this._seqs(), recs = [];
+  for (var i = 0; i < seqs.length; i++) {
+    var d = localStorage.getItem(this._recKey(seqs[i]));
+    if (d != null) recs.push({ seq: seqs[i], data: d });   // data already base64
+  }
+  var schema = localStorage.getItem(this.p + ':schema');
+  return { store: this.p, schema: schema == null ? null : Number(schema), records: recs };
+};
+
+Store.prototype._clear = function () {
+  var seqs = this._seqs();
+  for (var i = 0; i < seqs.length; i++) localStorage.removeItem(this._recKey(seqs[i]));
+  this._saveSeqs([]);
+};
+
+// Load a snapshot(). mode 'replace' wipes the archive first; 'merge' (default)
+// unions by seq — a re-seen seq overwrites, exactly like an idempotent PUSH.
+// ACKs the watch afterwards so its pager learns the new total. Returns the new
+// record count. Throws on a malformed snapshot.
+Store.prototype.restore = function (snap, mode) {
+  if (!snap || !Array.isArray(snap.records)) throw new Error('invalid snapshot');
+  if (mode === 'replace') this._clear();
+  var seqs = this._seqs();
+  for (var i = 0; i < snap.records.length; i++) {
+    var r = snap.records[i];
+    if (!r || typeof r.data !== 'string' || r.seq == null) throw new Error('invalid record at ' + i);
+    var seq = r.seq >>> 0;
+    localStorage.setItem(this._recKey(seq), r.data);   // base64 stored verbatim
+    insertSorted(seqs, seq);
+  }
+  this._saveSeqs(seqs);
+  if (snap.schema != null) localStorage.setItem(this.p + ':schema', String(snap.schema));
+  this._sendAck();
+  return seqs.length;
+};
+
 Store.prototype._onGet = function (p) {
   var offset = p[KEY.offset] || 0;       // 0 = newest
   var want = p[KEY.count] || 1;
@@ -151,3 +196,7 @@ Store.prototype._onGet = function (p) {
 };
 
 module.exports = Store;
+// Exposed so app-specific decoders (e.g. molkky_history.js) can turn a
+// snapshot()'s opaque base64 records back into bytes without re-rolling base64.
+module.exports.b64enc = b64enc;
+module.exports.b64dec = b64dec;

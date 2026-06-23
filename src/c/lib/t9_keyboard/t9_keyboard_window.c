@@ -25,12 +25,38 @@ static bool        s_done;            // guard: deliver the result exactly once
 static GPoint    s_touch_pt;
 static AppTimer *s_hold_timer;
 static bool      s_held;
+static int       s_touch_key;          // cell the press started on (-1 = off grid)
+static bool      s_canceled;           // finger slid off that cell: no tap/hold
+static AppTimer *s_del_repeat_timer;   // hold-to-erase on the on-screen DEL key
 
 // ---- Touch -----------------------------------------------------------------
+
+static void prv_del_repeat_cancel(void) {
+  if (s_del_repeat_timer) { app_timer_cancel(s_del_repeat_timer); s_del_repeat_timer = NULL; }
+}
+
+// Keep erasing while DEL is held, at the same cadence as the Down button, until
+// liftoff cancels the timer.
+static void prv_del_repeat(void *data) {
+  s_del_repeat_timer = NULL;
+  t9_keyboard_backspace(s_keyboard);
+  s_del_repeat_timer = app_timer_register(
+      t9_keyboard_delete_repeat_ms(s_keyboard), prv_del_repeat, NULL);
+}
 
 static void prv_hold_fire(void *data) {
   s_hold_timer = NULL;
   s_held = true;
+  // DEL holds repeat (erase continuously), so it stays visually pressed until the
+  // finger lifts. Every other key gets a one-shot hold, so its pressed look drops
+  // the moment the hold fires.
+  if (t9_keyboard_point_is_delete(s_keyboard, s_touch_pt)) {
+    t9_keyboard_backspace(s_keyboard);   // first erase now...
+    s_del_repeat_timer = app_timer_register(
+        t9_keyboard_delete_repeat_ms(s_keyboard), prv_del_repeat, NULL);  // ...then keep going
+    return;
+  }
+  t9_keyboard_handle_touch_up(s_keyboard);   // one-shot hold fired: drop the pressed look
   t9_keyboard_handle_hold(s_keyboard, s_touch_pt);
 }
 
@@ -39,15 +65,34 @@ static void prv_touch_handler(const TouchEvent *event, void *context) {
     case TouchEvent_Touchdown:
       s_touch_pt = GPoint(event->x, event->y);
       s_held = false;
+      s_canceled = false;
+      s_touch_key = t9_keyboard_key_at_point(s_keyboard, s_touch_pt);
       if (s_hold_timer) app_timer_cancel(s_hold_timer);
+      prv_del_repeat_cancel();
       s_hold_timer = app_timer_register(HOLD_MS, prv_hold_fire, NULL);
+      t9_keyboard_handle_touch_down(s_keyboard, s_touch_pt);   // pressed look now
       break;
-    case TouchEvent_PositionUpdate:
-      break;   // (could cancel the pending hold on large drift)
+    case TouchEvent_PositionUpdate: {
+      if (s_held) break;   // long-press already fired; the gesture is spent
+      // Slide off the starting key -> cancel: kill the pending long-press, drop the
+      // pressed look, and skip the tap on release. Sliding back on re-arms the tap.
+      int key = t9_keyboard_key_at_point(s_keyboard, GPoint(event->x, event->y));
+      if (key != s_touch_key && !s_canceled) {
+        s_canceled = true;
+        if (s_hold_timer) { app_timer_cancel(s_hold_timer); s_hold_timer = NULL; }
+        t9_keyboard_handle_touch_up(s_keyboard);
+      } else if (key == s_touch_key && s_canceled) {
+        s_canceled = false;
+        t9_keyboard_handle_touch_down(s_keyboard, s_touch_pt);
+      }
+      break;
+    }
     case TouchEvent_Liftoff:
       if (s_hold_timer) { app_timer_cancel(s_hold_timer); s_hold_timer = NULL; }
+      prv_del_repeat_cancel();
+      t9_keyboard_handle_touch_up(s_keyboard);                 // release the look
       // The keyboard fills the window, so screen coords == layer-local coords.
-      if (!s_held) t9_keyboard_handle_tap(s_keyboard, s_touch_pt);
+      if (!s_held && !s_canceled) t9_keyboard_handle_tap(s_keyboard, s_touch_pt);
       break;
   }
 }
@@ -69,10 +114,7 @@ static void prv_kb_done(const char *text, void *context) { prv_finish(text); }
 // ---- Buttons ---------------------------------------------------------------
 
 static void prv_up_click(ClickRecognizerRef rec, void *ctx) {
-  t9_keyboard_cycle_page(s_keyboard);
-}
-static void prv_up_long(ClickRecognizerRef rec, void *ctx) {
-  settings_window_push(s_keyboard);
+  settings_window_push(s_keyboard);        // Up opens the settings menu
 }
 static void prv_select_click(ClickRecognizerRef rec, void *ctx) {
   t9_keyboard_submit(s_keyboard);          // -> prv_kb_done -> prv_finish
@@ -81,7 +123,19 @@ static void prv_select_long(ClickRecognizerRef rec, void *ctx) {
   t9_keyboard_newline(s_keyboard);
 }
 static void prv_down_click(ClickRecognizerRef rec, void *ctx) {
+  t9_keyboard_cycle_page(s_keyboard);      // Down cycles the keyboard type (layout)
+}
+// Down held = backspace, with the same hold-to-repeat cadence as the on-screen
+// DEL key. The down handler erases once and arms the repeat; the up handler
+// (button released) stops it.
+static void prv_down_long_down(ClickRecognizerRef rec, void *ctx) {
+  prv_del_repeat_cancel();
   t9_keyboard_backspace(s_keyboard);
+  s_del_repeat_timer = app_timer_register(
+      t9_keyboard_delete_repeat_ms(s_keyboard), prv_del_repeat, NULL);
+}
+static void prv_down_long_up(ClickRecognizerRef rec, void *ctx) {
+  prv_del_repeat_cancel();
 }
 static void prv_back_click(ClickRecognizerRef rec, void *ctx) {
   prv_finish(NULL);                        // cancel
@@ -89,11 +143,10 @@ static void prv_back_click(ClickRecognizerRef rec, void *ctx) {
 
 static void prv_click_config(void *context) {
   window_single_click_subscribe(BUTTON_ID_UP, prv_up_click);
-  window_long_click_subscribe(BUTTON_ID_UP, 0, prv_up_long, NULL);
   window_single_click_subscribe(BUTTON_ID_SELECT, prv_select_click);
   window_long_click_subscribe(BUTTON_ID_SELECT, 0, prv_select_long, NULL);
-  window_single_repeating_click_subscribe(BUTTON_ID_DOWN,
-      t9_keyboard_delete_repeat_ms(s_keyboard), prv_down_click);
+  window_single_click_subscribe(BUTTON_ID_DOWN, prv_down_click);
+  window_long_click_subscribe(BUTTON_ID_DOWN, 0, prv_down_long_down, prv_down_long_up);
   window_single_click_subscribe(BUTTON_ID_BACK, prv_back_click);  // override exit
 }
 
@@ -119,6 +172,7 @@ static void prv_load(Window *window) {
 static void prv_unload(Window *window) {
   touch_service_unsubscribe();
   if (s_hold_timer) { app_timer_cancel(s_hold_timer); s_hold_timer = NULL; }
+  prv_del_repeat_cancel();
   t9_keyboard_destroy(s_keyboard);
   s_keyboard = NULL;
   window_destroy(s_window);

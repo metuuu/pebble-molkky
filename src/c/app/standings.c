@@ -1,4 +1,5 @@
 #include "standings.h"
+#include "c/lib/ui/ui_align.h"
 #include "c/lib/ui/ui_theme.h"
 #include "c/lib/ui/ui_text.h"
 
@@ -13,9 +14,8 @@ static const GPathInfo CROWN_PATH = {
 
 void ui_draw_crown(GContext *ctx, GRect box, int number, bool selected) {
   if (!s_crown) s_crown = gpath_create(&CROWN_PATH);
-  // center the crown within box
-  int ox = box.origin.x + (box.size.w - CROWN_W) / 2;
-  int oy = box.origin.y + (box.size.h - CROWN_H) / 2;
+  GPoint o = ui_rect_center(box, GSize(CROWN_W, CROWN_H)).origin;
+  int ox = o.x, oy = o.y;
   gpath_move_to(s_crown, GPoint(ox, oy));
   // 1st = gold, 2nd = silver, 3rd = bronze
   GColor medal = GColorYellow;
@@ -31,11 +31,31 @@ void ui_draw_crown(GContext *ctx, GRect box, int number, bool selected) {
 }
 
 void standings_crown_acc(GContext *ctx, GRect box, RowColors colors, void *data) {
+  // The crown's number (its visual focus) sits a few px below the crown's
+  // geometric center, so a plain center-in-cell reads low against the name. Lift
+  // the crown so the number lines up with the title's optical center.
+  box.origin.y -= 3;
   ui_draw_crown(ctx, box, (int)(intptr_t)data, false);
+}
+
+// Trailing accessory for an eliminated, unplaced player: "out (score)" with the
+// score in a lighter gray than the muted "out", right-aligned in the slot.
+static void standings_out_acc(GContext *ctx, GRect box, RowColors col, void *data) {
+  int score = (int)(intptr_t)data;
+  char paren[8]; snprintf(paren, sizeof paren, "(%d)", score);
+
+  GRect r = box; r.size.w -= 6;                        // small right margin
+  graphics_context_set_text_color(ctx, ui_neutral());  // light gray "(score)"
+  ui_text_draw(ctx, paren, UI_FONT_BODY_BOLD, r, GTextAlignmentRight, true, GTextOverflowModeFill);
+
+  GRect ob = r; ob.size.w -= 30;                        // reserve the parenthesized score
+  graphics_context_set_text_color(ctx, col.fg);        // muted "out"
+  ui_text_draw(ctx, "out", UI_FONT_BODY_BOLD, ob, GTextAlignmentRight, true, GTextOverflowModeFill);
 }
 
 void standings_fill_row(ListItem *item, const char *name, int place, int score, bool out) {
   snprintf(item->title, sizeof(item->title), "%s", name);
+  item->content_dy = 2;                               // nudge the name/score down a touch (crown stays put)
 
   // left badge: a crown for the podium (1st-3rd), otherwise just the number
   if (place >= 1 && place <= 3) {
@@ -46,12 +66,13 @@ void standings_fill_row(ListItem *item, const char *name, int place, int score, 
     snprintf(item->leading.value, sizeof(item->leading.value), "%d.", place);
   }
 
-  // an eliminated, unplaced player shows "out" and renders muted
-  item->trailing.kind = ACC_VALUE;
+  // an eliminated, unplaced player shows "out (score)" and renders muted
   if (out && place == 0) {
     item->disabled = true;
-    snprintf(item->trailing.value, sizeof(item->trailing.value), "out");
+    item->trailing = (Accessory){ .kind = ACC_CUSTOM,
+      .custom = { standings_out_acc, (void *)(intptr_t)score } };
   } else {
+    item->trailing.kind = ACC_VALUE;
     snprintf(item->trailing.value, sizeof(item->trailing.value), "%d", score);
   }
 }

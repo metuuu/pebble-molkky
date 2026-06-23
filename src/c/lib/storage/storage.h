@@ -31,10 +31,22 @@
 // interprets them, decoupling the JS side from the C struct layout.
 // =============================================================================
 
-// Compile-time ceilings. A slot carries a 4-byte seq header in persist, so keep
-// record_size + 4 under the 256-byte-per-value persist limit.
-#define STORAGE_REC_MAX   128
-#define STORAGE_CACHE_MAX 32
+// The largest record the store can persist: a slot carries a 4-byte seq header
+// and a persist value is capped at 256 bytes, so record_size + 4 <= 256. This is
+// a hardware limit; the cache *depth* has no fixed ceiling (see arena below).
+#define STORAGE_REC_MAX 252
+
+// Backing memory (bytes) the store needs for `cap` records of `rec` bytes each.
+// The library keeps no static cache of its own — the caller provisions this buffer
+// via StorageConfig.arena, so each app pays only for the window it keeps. The
+// arena is carved into the seq table, the RAM cache mirror, and the page/tx
+// scratch; the aligned regions assume a 4-byte-aligned arena.
+#define STORAGE_ALIGN4(n) (((size_t)(n) + 3u) & ~(size_t)3u)
+#define STORAGE_ARENA_BYTES(rec, cap)                 \
+  ( STORAGE_ALIGN4((size_t)(cap) * sizeof(uint32_t))  \
+  + STORAGE_ALIGN4((size_t)(cap) * (size_t)(rec))     \
+  + STORAGE_ALIGN4((size_t)(cap) * (size_t)(rec))     \
+  + (size_t)(cap) * ((size_t)(rec) + 4u) )
 
 typedef enum {
   STORAGE_SYNCED,    // everything is backed up to the phone
@@ -46,11 +58,20 @@ typedef struct StorageConfig {
   uint16_t record_size;     // bytes per record (1 .. STORAGE_REC_MAX). Use a multiple
                             // of 4 if you read records back through a struct pointer
                             // (sizeof a word-aligned struct already is) so slots stay aligned.
-  uint8_t  cache_capacity;  // recent records kept on-watch (1 .. STORAGE_CACHE_MAX)
+  uint8_t  cache_capacity;  // recent records kept on-watch (>= 1; bounded only by the
+                            // arena — clamped down to whatever `arena` can back).
   uint8_t  schema;          // app record schema/version, forwarded to the phone
   uint16_t base_key;        // first persist key the store owns; uses
                             //   base_key + 0                  (header)
                             //   base_key + 1 .. + cache_capacity (slots)
+
+  // Caller-owned backing memory for the RAM cache and send/page scratch, carved by
+  // the store. Provide a 4-byte-aligned buffer of at least
+  // STORAGE_ARENA_BYTES(record_size, cache_capacity) that outlives the store
+  // (typically a static array). cache_capacity is clamped down to what `arena` can
+  // back, so the two always agree.
+  void  *arena;
+  size_t arena_size;
 
   // ---- async callbacks (always fire on the app's main loop) ----
   // A requested page arrived. `recs` points to `count` contiguous records

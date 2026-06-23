@@ -1,6 +1,7 @@
 #include "players.h"
 #include "molkky.h"
 #include "c/lib/ui/menu.h"
+#include "c/lib/ui/view.h"
 #include "game.h"
 #include "c/lib/t9_keyboard/t9_keyboard_window.h"
 
@@ -22,32 +23,41 @@ static bool  s_confirm_arch;          // pending delete-confirm targets the arch
 
 static void open_options(int idx);
 static void archived_push(void);
+static void player_stats_push(int idx);
 
-// Rows: the active players, then a trailing "Archived players" row when any
-// exist. A lone placeholder shows only when there are no players at all.
+static void on_pl_add(const char *text, void *ctx) {
+  if (text && text[0]) mk_roster_add(text);   // list reloads on reappear
+}
+
+// Rows: 0 = + Add player, then the active players, then a trailing "Archived
+// players" row when any exist.
 static uint16_t pl_count(void *c) {
   int n = mk_roster_count(), a = mk_roster_archived_count();
-  if (n == 0 && a == 0) return 1;
-  return n + (a > 0 ? 1 : 0);
+  return 1 + n + (a > 0 ? 1 : 0);
 }
 static void pl_item(void *c, uint16_t i, ListItem *out) {
-  int n = mk_roster_count(), a = mk_roster_archived_count();
-  if (n == 0 && a == 0) { snprintf(out->title, sizeof out->title, "No players yet"); return; }
-  if (i < n) {
-    snprintf(out->title, sizeof out->title, "%s", mk_roster_name(i));
+  int n = mk_roster_count();
+  if (i == 0) {                                       // user-plus icon shows the "+"
+    snprintf(out->title, sizeof out->title, "Add player");
+    out->leading = (Accessory){ .kind = ACC_ICON, .icon_res = RESOURCE_ID_IMAGE_USER_PLUS };
+    return;
+  }
+  if (i - 1 < n) {
+    snprintf(out->title, sizeof out->title, "%s", mk_roster_name(i - 1));
     out->leading = (Accessory){ .kind = ACC_ICON, .icon_res = RESOURCE_ID_IMAGE_USER };
     return;
   }
+  int a = mk_roster_archived_count();
   snprintf(out->title, sizeof out->title, "Archived players");
   snprintf(out->subtitle, sizeof out->subtitle, "%d player%s", a, a == 1 ? "" : "s");
   out->leading  = (Accessory){ .kind = ACC_ICON, .icon_res = RESOURCE_ID_IMAGE_ARCHIVE };
   out->trailing = (Accessory){ .kind = ACC_CHEVRON };
 }
 static void pl_select(void *c, uint16_t i) {
-  int n = mk_roster_count(), a = mk_roster_archived_count();
-  if (n == 0 && a == 0) return;
-  if (i < n) open_options(i);
-  else if (a > 0) archived_push();
+  int n = mk_roster_count();
+  if (i == 0) { t9_keyboard_window_push_ex(on_pl_add, "", MK_MAX_NAME - 1, NULL); return; }
+  if (i - 1 < n) open_options(i - 1);
+  else archived_push();
 }
 
 void players_push(void) {
@@ -76,6 +86,40 @@ static void cf_select(void *c, uint16_t i) {
   window_stack_pop(true);                          // pop confirm -> list underneath
 }
 
+// ---------------------------- Player stats ----------------------------
+// Lifetime totals for one player, rendered with the shared block view. Values
+// are derived from the running MKLifetime sums (see molkky.c) — averages are
+// rounded to one decimal / nearest percent.
+static void player_stats_push(int idx) {
+  const MKLifetime *L = mk_stats_get(idx);
+  Block b[7];
+  char v0[12], v1[20], v2[8], v3[16], v4[16];
+  int n = 0;
+  b[n++] = block_section(mk_stats_name(idx));
+  if (!L || L->games == 0) {
+    b[n++] = block_field("No games yet", "Play a game to track stats");
+    view_push(b, n, (ViewOpts){ .size = UI_SIZE_SM });
+    return;
+  }
+  snprintf(v0, sizeof v0, "%d", (int)L->games);
+  b[n++] = block_field_inline("Games", v0);
+  int winpct = (int)((L->wins * 100u + L->games / 2) / L->games);
+  snprintf(v1, sizeof v1, "%d%% (%d)", winpct, (int)L->wins);
+  b[n++] = block_field_inline("Win rate", v1);
+  if (L->throws) {
+    int acc = (int)(((L->throws - L->misses) * 100u + L->throws / 2) / L->throws);
+    snprintf(v2, sizeof v2, "%d%%", acc);
+    b[n++] = block_field_inline("Accuracy", v2);
+    int pts10 = (int)((L->points * 10u + L->throws / 2) / L->throws);
+    snprintf(v3, sizeof v3, "%d.%d", pts10 / 10, pts10 % 10);
+    b[n++] = block_field_inline("Pts / turn", v3);
+  }
+  int plc10 = (int)((L->place_sum * 10u + L->games / 2) / L->games);
+  snprintf(v4, sizeof v4, "%d.%d", plc10 / 10, plc10 % 10);
+  b[n++] = block_field_inline("Avg place", v4);
+  view_push(b, n, (ViewOpts){ .size = UI_SIZE_SM });
+}
+
 // ---------------------------- Player options ----------------------------
 static void on_rename(const char *text, void *ctx) {
   if (text && text[0]) {
@@ -84,10 +128,11 @@ static void on_rename(const char *text, void *ctx) {
     window_stack_remove(menu_window(s_opts_menu), false);
   }
 }
-static uint16_t opt_count(void *c) { return 3; }
+static uint16_t opt_count(void *c) { return 4; }
 static void opt_item(void *c, uint16_t i, ListItem *out) {
-  static const char    *titles[] = { "Rename", "Archive", "Delete" };
-  static const uint32_t  icons[]  = { RESOURCE_ID_IMAGE_RENAME,
+  static const char    *titles[] = { "Stats", "Rename", "Archive", "Delete" };
+  static const uint32_t  icons[]  = { RESOURCE_ID_IMAGE_CHART,
+                                      RESOURCE_ID_IMAGE_RENAME,
                                       RESOURCE_ID_IMAGE_ARCHIVE,
                                       RESOURCE_ID_IMAGE_DELETE };
   snprintf(out->title, sizeof out->title, "%s", titles[i]);
@@ -95,8 +140,10 @@ static void opt_item(void *c, uint16_t i, ListItem *out) {
 }
 static void opt_select(void *c, uint16_t i) {
   if (i == 0) {
-    t9_keyboard_window_push_ex(on_rename, mk_roster_name(s_opt_idx), MK_MAX_NAME - 1, NULL);
+    player_stats_push(s_opt_idx);
   } else if (i == 1) {
+    t9_keyboard_window_push_ex(on_rename, mk_roster_name(s_opt_idx), MK_MAX_NAME - 1, NULL);
+  } else if (i == 2) {
     mk_roster_archive(s_opt_idx);
     window_stack_remove(menu_window(s_opts_menu), false);   // back to the players list
   } else {

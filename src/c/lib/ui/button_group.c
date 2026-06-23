@@ -66,7 +66,10 @@ static void group_draw(Layer *layer, GContext *ctx) {
     bool held   = (i == g->pressed && !g->canceled);
     bool active = held || (i == g->focus && g->pressed < 0);
     UiButtonSpec s = b->look;
-    if (active) { s.style = b->active_style; s.scheme = b->active_scheme; }
+    if (active) {
+      s.style = b->active_style; s.scheme = b->active_scheme;
+      if (b->active_fill.argb != 0) s.fill_override = b->active_fill;
+    }
     s.pressed = held;   // 3D buttons (elevation > 0) sink while held; flat ones ignore it
     ui_button_draw(ctx, b->frame, &s);
   }

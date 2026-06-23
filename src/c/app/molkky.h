@@ -8,8 +8,8 @@
 
 #define MK_MAX_PLAYERS 16
 #define MK_MAX_HIST_PLAYERS 14   // a history record keeps at most this many results: with
-                                 // the per-player stats it's 8 B/result, and 8 B header +
-                                 // 14*8 = 120 B keeps MKHistGame a 4-byte multiple under the
+                                 // the per-player stats it's 8 B/result, and a 12 B header +
+                                 // 14*8 = 124 B keeps MKHistGame a 4-byte multiple under the
                                  // storage lib's 128-byte record ceiling (STORAGE_REC_MAX).
                                  // A 15-16 player game drops its worst-placed finishers.
 #define MK_MAX_NAME    16     // bytes incl. NUL (~15 chars)
@@ -74,12 +74,28 @@ typedef struct {
 
 typedef struct {
   int32_t  date;      // unix time the game ended
-  uint16_t duration;  // game length in minutes (start = date - duration*60). Saturates
-                      // to 0 on a backwards clock; wraps past ~45 days (accepted).
+  int32_t  start;     // unix time of the first throw. Duration is derived on display
+                      // (date - start); a backwards clock / missing start reads as 0.
   uint8_t  count;
   uint8_t  settings;  // MK_SET_LOSE3 | MK_SET_FINAL
+  uint8_t  _pad[2];   // keep results[] 4-aligned and the struct a 4-byte multiple (124 B)
   MKResult results[MK_MAX_HIST_PLAYERS];   // sorted by place
 } MKHistGame;
+
+// Per-player lifetime totals, accumulated once when a game finishes (see
+// mk_game_end). These are running sums — the watch never recomputes them from
+// history, so they stay correct even as old games age out of the on-watch cache.
+// Kept parallel to the roster (one per player, by slot) and persisted alongside
+// it. The phone holds the full archive and can recompute the same figures from
+// scratch (see molkky_history.js) — this on-watch copy is for instant display.
+typedef struct {
+  uint16_t games;       // games finished
+  uint16_t wins;        // games finished in 1st place (shared crowns each count)
+  uint32_t throws;      // total turns          → accuracy = 1 - misses/throws
+  uint32_t misses;      // total missed turns
+  uint32_t points;      // total pins knocked   → avg/turn = points/throws
+  uint16_t place_sum;   // sum of finishing places → avg finish = place_sum/games
+} MKLifetime;           // 18 B
 
 typedef enum { MK_THROW_NORMAL, MK_THROW_WIN, MK_THROW_GAMEOVER } MKThrowResult;
 
@@ -105,6 +121,15 @@ void        mk_roster_archived_delete(int j);
 // NULL when no such player exists any more (deleted).
 const char *mk_name_by_id(uint8_t id);
 
+// ---- lifetime stats ----
+// Per-player running totals over every finished game (accuracy, points/turn,
+// finishes). Indexed like the active roster (mk_stats_count == mk_roster_count);
+// mk_stats_get returns NULL for a bad index. A player with no finished games has
+// an all-zero MKLifetime.
+int               mk_stats_count(void);
+const char       *mk_stats_name(int i);
+const MKLifetime *mk_stats_get(int i);
+
 // ---- settings ----
 bool mk_lose_on_3(void);
 void mk_set_lose_on_3(bool v);
@@ -113,6 +138,9 @@ void mk_set_lose_on_3(bool v);
 // strictly ordered by who crowned first (1,2,3,4,5).
 bool mk_final_round(void);
 void mk_set_final_round(bool v);
+// "Show header": a top bar on menu pages with the page title and a live clock.
+bool mk_show_header(void);
+void mk_set_show_header(bool v);
 
 // ---- game ----
 bool          mk_game_active(void);              // a game exists (for Continue)

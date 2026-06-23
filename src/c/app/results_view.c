@@ -2,12 +2,22 @@
 #include "molkky.h"
 #include "standings.h"
 #include "c/lib/ui/view.h"
+#include "c/lib/ui/ui_theme.h"
 
 // One results screen exists at a time, and it's built from a deep call stack
 // (throw -> end -> push), so the block array is static rather than on the stack
 // (at 16 players an on-stack array faults the app — see the old game.c note).
 #define RV_MAX_STATS 5
-static Block s_blocks[1 + MK_MAX_PLAYERS + 2 + RV_MAX_STATS];
+static Block s_blocks[2 + MK_MAX_PLAYERS + 2 + RV_MAX_STATS];
+
+// The game's date sits above the first section as a plain title; the buffer is
+// static because the block only holds a pointer to it.
+static char s_date[24];
+static void draw_date(GContext *ctx, GRect r, void *data) {
+  graphics_context_set_text_color(ctx, ui_text());
+  ui_text_draw(ctx, s_date, UI_FONT_BODY_BOLD, GRect(r.origin.x + 6, r.origin.y, r.size.w - 12, r.size.h),
+               GTextAlignmentLeft, true, GTextOverflowModeFill);
+}
 
 // "12 min", "1 h 5 min", "2 h"; sub-minute games read "< 1 min".
 static void fmt_duration(uint16_t mins, char *buf, size_t n) {
@@ -17,20 +27,13 @@ static void fmt_duration(uint16_t mins, char *buf, size_t n) {
   else                  snprintf(buf, n, "%d h", mins / 60);
 }
 
-// The rules a game was played under, e.g. "Lose from 3 · Final round".
-static void fmt_rules(uint8_t settings, char *buf, size_t n) {
-  const char *lose  = (settings & MK_SET_LOSE3) ? "Lose from 3" : NULL;
-  const char *final = (settings & MK_SET_FINAL) ? "Final round" : NULL;
-  if (lose && final) snprintf(buf, n, "%s · %s", lose, final);
-  else if (lose)     snprintf(buf, n, "%s", lose);
-  else if (final)    snprintf(buf, n, "%s", final);
-  else               snprintf(buf, n, "Standard");
-}
-
 void results_view_push(const char *title, const ResultRow *rows, int count,
                        uint16_t duration, uint8_t settings, void (*on_select)(void)) {
+  (void)settings;                                    // rules row dropped; kept for API compatibility
   int n = 0;
-  s_blocks[n++] = block_section(title);
+  snprintf(s_date, sizeof s_date, "%s", title ? title : "");
+  s_blocks[n++] = block_custom(4 + ui_font_cap(UI_FONT_BODY_BOLD) + 4, draw_date, NULL);
+  s_blocks[n++] = block_section("Results");
   for (int i = 0; i < count && i < MK_MAX_PLAYERS; i++) {
     ListItem item = list_item_empty();
     standings_fill_row(&item, rows[i].name, rows[i].place, rows[i].score, rows[i].out);
@@ -41,26 +44,25 @@ void results_view_push(const char *title, const ResultRow *rows, int count,
   s_blocks[n++] = block_section("Stats");
   char val[32];
 
-  // Most misses — only a single clear leader who actually missed.
-  int mm = 0;
-  for (int i = 0; i < count; i++) if (rows[i].misses > mm) mm = rows[i].misses;
-  int mm_n = 0, mm_i = -1;
-  for (int i = 0; i < count; i++) if (rows[i].misses == mm) { mm_n++; mm_i = i; }
-  if (mm > 0 && mm_n == 1) {
-    snprintf(val, sizeof val, "%s (%d)", rows[mm_i].name, mm);
-    s_blocks[n++] = block_field("Most misses", val);
+  // Accuracy extremes — a player's hits / throws as a percentage. Show the best,
+  // and the worst when it's a different player. Players who never threw are
+  // skipped (no throws → no meaningful accuracy).
+  int hi_i = -1, lo_i = -1, hi_acc = -1, lo_acc = 101;
+  for (int i = 0; i < count; i++) {
+    if (rows[i].throws == 0) continue;
+    int acc = (rows[i].throws - rows[i].misses) * 100 / rows[i].throws;
+    if (acc > hi_acc) { hi_acc = acc; hi_i = i; }
+    if (acc < lo_acc) { lo_acc = acc; lo_i = i; }
   }
-
-  // Most accurate — only if exactly one player missed the least of everyone.
-  if (count > 1) {
-    int lo = rows[0].misses;
-    for (int i = 1; i < count; i++) if (rows[i].misses < lo) lo = rows[i].misses;
-    int lo_n = 0, lo_i = -1;
-    for (int i = 0; i < count; i++) if (rows[i].misses == lo) { lo_n++; lo_i = i; }
-    if (lo_n == 1) {
-      snprintf(val, sizeof val, "%s (%d miss%s)", rows[lo_i].name, lo, lo == 1 ? "" : "es");
-      s_blocks[n++] = block_field("Most accurate", val);
-    }
+  if (hi_i >= 0) {
+    int m = rows[hi_i].misses;
+    snprintf(val, sizeof val, "%s %d%% (%d miss%s)", rows[hi_i].name, hi_acc, m, m == 1 ? "" : "es");
+    s_blocks[n++] = block_field("Highest accuracy", val);
+  }
+  if (lo_i >= 0 && lo_i != hi_i) {
+    int m = rows[lo_i].misses;
+    snprintf(val, sizeof val, "%s %d%% (%d miss%s)", rows[lo_i].name, lo_acc, m, m == 1 ? "" : "es");
+    s_blocks[n++] = block_field("Lowest accuracy", val);
   }
 
   // Average points per turn across the whole game (a miss is a 0-point turn).
@@ -74,8 +76,6 @@ void results_view_push(const char *title, const ResultRow *rows, int count,
 
   fmt_duration(duration, val, sizeof val);
   s_blocks[n++] = block_field("Duration", val);
-  fmt_rules(settings, val, sizeof val);
-  s_blocks[n++] = block_field("Rules", val);
 
-  view_push(s_blocks, n, (ViewOpts){ .size = UI_SIZE_SM, .on_select = on_select });
+  view_push(s_blocks, n, (ViewOpts){ .size = UI_SIZE_MD, .on_select = on_select });
 }
