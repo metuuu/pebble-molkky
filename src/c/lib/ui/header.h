@@ -18,9 +18,20 @@
 
 typedef struct Header Header;
 
+// App-level header config, shared by every container that can show a header
+// (menu, paged_list). Set once at startup and whenever a setting toggles; reads
+// on the next (re)load — live windows don't repaint until then.
+void     header_set_enabled(bool enabled);
+bool     header_enabled(void);
+// Bitmap drawn at the left edge of the bar (a resource id; 0 = none). Branding
+// belongs to the app, not this generic lib, so the caller supplies the icon.
+void     header_set_icon(uint32_t res);
+uint32_t header_icon(void);
+
 // Create a header pinned to the top of `parent` (a window's root layer) and add
-// it as a child. `title` is copied. The first live header subscribes the minute
-// tick; the last to be destroyed unsubscribes.
-Header *header_create(Layer *parent, const char *title);
+// it as a child. `title` is copied. `icon_res` (0 = none) is drawn at the left,
+// before the title. The first live header subscribes the minute tick; the last
+// to be destroyed unsubscribes.
+Header *header_create(Layer *parent, const char *title, uint32_t icon_res);
 void    header_set_title(Header *h, const char *title);
 void    header_destroy(Header *h);

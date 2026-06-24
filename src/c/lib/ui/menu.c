@@ -1,5 +1,6 @@
 #include "menu.h"
 #include "list_core.h"
+#include "header.h"
 
 Menu *menu_push(const char *title, MenuConfig cfg) {
   return list_core_push(title, (ListCoreConfig) {
@@ -19,3 +20,4 @@ void    menu_reload(Menu *m) { list_core_reload(m); }
 Window *menu_window(Menu *m) { return list_core_window(m); }
 void    menu_set_header_enabled(bool e) { list_core_set_header_enabled(e); }
 bool    menu_header_enabled(void) { return list_core_header_enabled(); }
+void    menu_set_header_icon(uint32_t res) { header_set_icon(res); }

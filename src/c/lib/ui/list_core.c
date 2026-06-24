@@ -8,10 +8,6 @@
 // main menu's four is the most), so this is comfortably oversized.
 #define LC_ICON_CACHE 8
 
-// App-level: whether titled lists draw a top header bar. Off until the app opts
-// in via list_core_set_header_enabled (e.g. from a persisted user setting).
-static bool s_header_enabled;
-
 struct ListCore {
   Window    *window;
   MenuLayer *menu;
@@ -128,9 +124,9 @@ static void lc_skip_disabled(ListCore *c) {
 static void lc_layout(ListCore *c) {
   Layer *root = window_get_root_layer(c->window);
   GRect rb = layer_get_bounds(root);
-  bool want = s_header_enabled && c->title[0];
+  bool want = header_enabled() && c->title[0];
   if (want && !c->header) {
-    c->header = header_create(root, c->title);
+    c->header = header_create(root, c->title, header_icon());
   } else if (!want && c->header) {
     header_destroy(c->header);
     c->header = NULL;
@@ -200,5 +196,5 @@ void    list_core_reload(ListCore *c) {
 }
 Window *list_core_window(ListCore *c) { return c ? c->window : NULL; }
 
-void list_core_set_header_enabled(bool enabled) { s_header_enabled = enabled; }
-bool list_core_header_enabled(void) { return s_header_enabled; }
+void list_core_set_header_enabled(bool enabled) { header_set_enabled(enabled); }
+bool list_core_header_enabled(void) { return header_enabled(); }

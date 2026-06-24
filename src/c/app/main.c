@@ -93,6 +93,9 @@ static void init(void) {
   // Brand the keyboard from the same palette — no colors duplicated here. Its
   // "Mölkky" skin is one pick alongside the keyboard's built-in themes.
   t9_keyboard_set_app_theme("Mölkky", ui_theme_get());
+  // Brand the header bar with the Mölkky logo (drawn at its left when the header
+  // is on; see header.c's HEADER_SHOW_ICON debug switch to toggle it off).
+  menu_set_header_icon(RESOURCE_ID_IMAGE_LOGO);
   s_menu = menu_push("Mölkky", (MenuConfig) {
     .get_count = menu_count, .get_item = menu_item, .on_select = menu_select,
   });
