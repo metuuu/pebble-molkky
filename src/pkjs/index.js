@@ -39,6 +39,15 @@ Pebble.addEventListener('webviewclosed', function (e) {
   var res;
   try { res = JSON.parse(decodeURIComponent(e.response)); }
   catch (err) { console.log('config: bad response'); return; }
+  if (res.action === 'reset') {                 // wipe the archive on the phone and the watch
+    try {
+      history.reset();
+      console.log('reset: archive cleared');
+    } catch (err) {
+      console.log('reset failed: ' + err.message);
+    }
+    return;
+  }
   if (res.action !== 'import') return;          // "Done"/back: nothing to do
   var snap;
   try { snap = JSON.parse(res.raw); }
