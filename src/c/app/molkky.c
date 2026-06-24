@@ -52,7 +52,10 @@ static uint8_t s_store_arena[STORAGE_ARENA_BYTES(sizeof(MKHistGame), MK_MAX_HIST
 //     (duration is derived on display); the watch now keeps per-player lifetime
 //     stats (PK_STATS/PK_STATS2). The record layout changed again, so the cache
 //     resets and the phone archive is abandoned (unreleased app — no migration).
-#define MK_SCHEMA     7
+// v8: MKGamePlayer gained out_order (eliminated players are ranked by drop order);
+//     the wider in-progress player blob is discarded. History records (MKResult)
+//     are unaffected, so the store is untouched.
+#define MK_SCHEMA     8
 
 // A roster entry. `id` is stable for the player's lifetime and never reused, so
 // history can reference a player by id and still show the right (current) name —
@@ -248,6 +251,12 @@ static void migrate_persist(int from) {
     // store resets its cache on the size mismatch; the in-progress game is
     // unaffected (GameHdr is unchanged) but lifetime stats start empty. Nothing
     // to migrate — PK_STATS/PK_STATS2 simply don't exist yet and read as zero.
+  }
+  if (from < 8) {
+    // MKGamePlayer grew out_order; the old player blob can't be reread at the new
+    // size, so discard the in-progress game (history is unaffected).
+    persist_delete(PK_GAME_HDR);
+    persist_delete(PK_GAME_PLRS);
   }
 }
 
@@ -540,7 +549,12 @@ MKThrowResult mk_game_throw(int v) {
   bool retired_now = false;
   if (v == 0) {                                       // miss
     p->misses++; p->total_misses++;
-    if (s_lose_on_3 && p->misses >= 3) p->out = true;
+    if (s_lose_on_3 && p->misses >= 3 && !p->out) {   // eliminated
+      int dropped = 0;                                // 0-based drop order: later out ranks higher
+      for (int i = 0; i < s_game.count; i++) if (s_game.players[i].out) dropped++;
+      p->out_order = (uint8_t)dropped;
+      p->out = true;
+    }
   } else {                                            // a hit clears the miss streak
     p->misses = 0; p->points += v;
     int ns = p->score + v;
@@ -641,16 +655,20 @@ static void hist_add(const MKGame *g) {
   storage_append(&hg);
 }
 
-// Standings key for unplaced (never-reached-50) players: active before out, then
-// higher score. True when a outranks b.
+// Standings key for unplaced (never-reached-50) players. True when a outranks b:
+// still-standing ranks above eliminated; among the standing, higher score wins;
+// among the eliminated, whoever dropped later (higher out_order) ranks higher.
 static bool mk_better(const MKGamePlayer *a, const MKGamePlayer *b) {
-  if (a->out != b->out) return !a->out;      // not-out ranks above out
+  if (a->out != b->out) return !a->out;          // not-out ranks above out
+  if (a->out)           return a->out_order > b->out_order;
   return a->score > b->score;
 }
 
 void mk_game_end(void) {
   MKGame *g = &s_game;
   int base = mk_retired_count();             // players already placed by reaching 50
+  // Everyone gets a place. Eliminated players rank below the still-standing and,
+  // among themselves, by drop order (last out ranks higher) — see mk_better.
   if (s_final_round) {
     // Competition ranking with ties: equal-standing players share a place, and
     // the next distinct standing skips accordingly (… 3, 3, 5).

@@ -32,6 +32,7 @@ typedef struct {
   bool     retired;       // reached 50 — has a placement
   uint8_t  place;         // 1-based, set when retired/finished
   uint8_t  id;            // roster id; the name resolves via mk_game_player_name()
+  uint8_t  out_order;     // 0-based elimination order; later-dropped ranks higher among the out
   uint16_t total_misses;  // cumulative misses this game (for end-of-game stats)
   uint16_t throws;        // turns taken (for the per-turn average)
   uint16_t points;        // cumulative pins knocked, miss = 0 (for the average)
