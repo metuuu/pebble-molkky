@@ -138,6 +138,7 @@ static void lc_layout(ListCore *c) {
 
 static void lc_appear(Window *w) {
   ListCore *c = window_get_user_data(w);
+  lc_layout(c);          // reconcile the header: the setting may have toggled in a sub-window
   menu_layer_reload_data(c->menu);
   lc_skip_disabled(c);
 }
