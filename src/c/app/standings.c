@@ -38,8 +38,18 @@ void standings_crown_acc(GContext *ctx, GRect box, RowColors colors, void *data)
   ui_draw_crown(ctx, box, (int)(intptr_t)data, false);
 }
 
-// Trailing accessory for an eliminated, unplaced player: "out (score)" with the
-// score in a lighter gray than the muted "out", right-aligned in the slot.
+// Leading badge for a non-podium finisher (place 4+, or an eliminated player):
+// the rank number "4." in a smaller font than the crowned places carry, so the
+// podium reads as the visual focus.
+static void standings_place_acc(GContext *ctx, GRect box, RowColors col, void *data) {
+  char n[8]; snprintf(n, sizeof n, "%d.", (int)(intptr_t)data);
+  box.origin.y += 2;                                   // drop the number to sit with the name baseline
+  graphics_context_set_text_color(ctx, col.fg);
+  ui_text_draw(ctx, n, UI_FONT_BODY_BOLD, box, GTextAlignmentCenter, true, GTextOverflowModeFill);
+}
+
+// Trailing accessory for an eliminated player: "out (score)" with the score in
+// a lighter gray than the muted "out", right-aligned in the slot.
 static void standings_out_acc(GContext *ctx, GRect box, RowColors col, void *data) {
   int score = (int)(intptr_t)data;
   char paren[8]; snprintf(paren, sizeof paren, "(%d)", score);
@@ -57,17 +67,18 @@ void standings_fill_row(ListItem *item, const char *name, int place, int score, 
   snprintf(item->title, sizeof(item->title), "%s", name);
   item->content_dy = 2;                               // nudge the name/score down a touch (crown stays put)
 
-  // left badge: a crown for the podium (1st-3rd), otherwise just the number
-  if (place >= 1 && place <= 3) {
+  // left badge: a crown for the podium (1st-3rd) — never for an eliminated
+  // player, who shows just the rank number — otherwise the plain number
+  if (!out && place >= 1 && place <= 3) {
     item->leading = (Accessory){ .kind = ACC_CUSTOM,
       .custom = { standings_crown_acc, (void *)(intptr_t)place } };
   } else if (place > 0) {
-    item->leading.kind = ACC_VALUE;
-    snprintf(item->leading.value, sizeof(item->leading.value), "%d.", place);
+    item->leading = (Accessory){ .kind = ACC_CUSTOM,
+      .custom = { standings_place_acc, (void *)(intptr_t)place } };
   }
 
-  // an eliminated, unplaced player shows "out (score)" and renders muted
-  if (out && place == 0) {
+  // an eliminated player shows "out (score)" on the right and renders muted
+  if (out) {
     item->disabled = true;
     item->trailing = (Accessory){ .kind = ACC_CUSTOM,
       .custom = { standings_out_acc, (void *)(intptr_t)score } };
