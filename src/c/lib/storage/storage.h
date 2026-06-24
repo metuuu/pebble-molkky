@@ -98,6 +98,12 @@ typedef struct StorageConfig {
   // The sync state / unsynced count changed. `total` is the best-known phone
   // archive size (0 until the first successful sync).
   void (*on_state)(void *ctx, StorageSyncState state, uint16_t unsynced, uint32_t total);
+  // The phone wiped the archive out from under the watch via an explicit *reset*
+  // from the settings page (not a plain import). By the time this fires the store
+  // has already dropped its now-stale cache and reset its seq bookkeeping, so the
+  // app should use it only to clear any derived state it keeps outside the store
+  // (e.g. lifetime stats). May be NULL.
+  void (*on_reset)(void *ctx);
   void *ctx;
 } StorageConfig;
 

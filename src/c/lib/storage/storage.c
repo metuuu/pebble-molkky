@@ -28,7 +28,12 @@ extern uint32_t MESSAGE_KEY_st_data;
 extern uint32_t MESSAGE_KEY_st_ack;
 extern uint32_t MESSAGE_KEY_st_total;
 
-enum { ST_PUSH = 1, ST_ACK = 2, ST_GET = 3, ST_PAGE = 4, ST_DEL = 5 };
+// ST_RESET (phone->watch) is sent when the phone replaces or clears the whole
+// archive (an import, or an explicit reset from the settings page). It carries the
+// phone's post-change highest seq (st_ack) and archive size (st_total), plus an
+// st_count flag (1 = explicit reset → fire on_reset). The watch drops its stale
+// cache, realigns its seq space to the phone's, and reloads page 0 from the phone.
+enum { ST_PUSH = 1, ST_ACK = 2, ST_GET = 3, ST_PAGE = 4, ST_DEL = 5, ST_RESET = 6 };
 
 #define STORE_FMT 1
 
@@ -72,7 +77,14 @@ static bool     s_get_valid;          // a page fetch is queued
 static uint32_t s_get_offset;
 static uint8_t  s_get_size;
 static uint32_t s_inflight_offset;    // offset of the GET currently in flight
+static uint8_t  s_inflight_size;      // record count requested by the GET in flight
 static uint32_t s_inflight_del;       // seq of the DEL currently in flight
+// Cache-refill after a phone-side reset/import: re-pull the newest records into
+// the on-watch cache. The GET in flight is a refill (its PAGE feeds the cache, not
+// on_page) when s_get_is_refill; s_refill_valid means more refill pages are wanted.
+static bool     s_refill_valid;
+static bool     s_get_is_refill;
+static uint32_t s_refill_off;         // next archive offset to pull into the cache
 static uint8_t  s_max_batch = 1;      // records per message the negotiated buffers allow
 
 static uint16_t frame_size(void) { return s_cfg.record_size + 4; }
@@ -224,12 +236,61 @@ static void pump(void) {
   }
   if (u == 0 && s_tomb_count == 0 && s_get_valid) {
     if (send_get(s_get_offset, s_get_size)) {
-      s_tx = TX_GET; s_inflight_offset = s_get_offset; s_get_valid = false;
+      s_tx = TX_GET; s_get_is_refill = false;
+      s_inflight_offset = s_get_offset; s_inflight_size = s_get_size; s_get_valid = false;
+    }
+    return;
+  }
+  // Last, rebuild the offline cache after a reset/import. One message holds at most
+  // s_max_batch records, so a deeper cache is refilled over several sequential GETs;
+  // each page's arrival (on_inbox) issues the next until the cache is full or the
+  // phone's archive is exhausted.
+  if (u == 0 && s_tomb_count == 0 && !s_get_valid && !s_get_is_refill && s_refill_valid) {
+    if (s_refill_off >= s_total) { s_refill_valid = false; return; }  // pulled the whole archive
+    uint8_t want = (uint8_t)(s_cfg.cache_capacity - s_count);
+    if (want > s_max_batch) want = s_max_batch;
+    if (want == 0) { s_refill_valid = false; return; }    // cache already full
+    if (send_get(s_refill_off, want)) {
+      s_tx = TX_GET; s_get_is_refill = true;
+      s_inflight_offset = s_refill_off; s_inflight_size = want;
     }
   }
 }
 
 // ---- AppMessage callbacks ----
+// The phone replaced or cleared the whole archive (import or explicit reset). The
+// phone is authoritative, so drop the now-stale local cache and any pending
+// tombstones, realign our seq space to the phone's (so new games get fresh,
+// non-colliding seqs and aren't mistaken for already-synced), then reload the
+// newest records back into the cache. NOTE: this discards any local records the
+// watch never managed to push — acceptable because the watch syncs on connect and
+// after every game, so by the time the phone-side import/reset runs (over that same
+// connection) the watch's games are already in the archive being restored.
+static void on_reset(DictionaryIterator *it) {
+  Tuple *a = dict_find(it, MESSAGE_KEY_st_ack);
+  Tuple *t = dict_find(it, MESSAGE_KEY_st_total);
+  Tuple *c = dict_find(it, MESSAGE_KEY_st_count);
+  uint32_t high  = a ? a->value->uint32 : 0;
+  uint32_t total = t ? t->value->uint32 : 0;
+  bool     full  = c && c->value->uint8;                       // explicit reset vs plain import
+
+  s_count = 0;
+  s_tomb_count = 0; tomb_save();
+  s_acked = high;
+  s_total = total;
+  if (s_next_seq <= high) s_next_seq = high + 1;               // never reuse a phone seq
+  if (s_next_seq == 0)    s_next_seq = 1;
+  save_all();
+
+  s_refill_valid   = total > 0;                                // nothing to reload from an empty archive
+  s_refill_off     = 0;
+  s_get_is_refill  = false;
+
+  if (full && s_cfg.on_reset) s_cfg.on_reset(s_cfg.ctx);       // let the app clear derived state (stats)
+  notify_state();
+  pump();                                                      // begin the cache refill if connected
+}
+
 static void on_inbox(DictionaryIterator *it, void *context) {
   Tuple *tp = dict_find(it, MESSAGE_KEY_st_type);
   if (!tp) return;
@@ -242,21 +303,40 @@ static void on_inbox(DictionaryIterator *it, void *context) {
     if (t) s_total = t->value->uint32;
     notify_state();
     pump();                                                // next batch, or the queued GET
+  } else if (type == ST_RESET) {
+    on_reset(it);
   } else if (type == ST_PAGE) {
     Tuple *d = dict_find(it, MESSAGE_KEY_st_data);
     Tuple *t = dict_find(it, MESSAGE_KEY_st_total);
     if (t) s_total = t->value->uint32;
-    uint8_t cnt = 0;
     uint16_t fs = frame_size();
-    if (d && d->length >= fs) {
-      cnt = d->length / fs;
-      if (cnt > s_max_page) cnt = s_max_page;                  // s_page holds at most max_page records
-      const uint8_t *src = d->value->data;
-      for (uint8_t i = 0; i < cnt; i++) {
+    uint8_t cnt = (d && d->length >= fs) ? d->length / fs : 0;
+    const uint8_t *src = cnt ? d->value->data : NULL;
+
+    if (s_get_is_refill) {
+      // A refill page: append its records (contiguous, newest-first) into the cache
+      // slots after whatever earlier refill pages filled, rebuilding page 0 offline.
+      for (uint8_t i = 0; i < cnt && s_count < s_cfg.cache_capacity; i++) {
         const uint8_t *f = src + (uint16_t)i * fs;
-        s_pageseq[i] = (uint32_t)f[0] | ((uint32_t)f[1] << 8) | ((uint32_t)f[2] << 16) | ((uint32_t)f[3] << 24);
-        memcpy(s_page + (uint16_t)i * s_cfg.record_size, f + 4, s_cfg.record_size);
+        s_seq[s_count] = (uint32_t)f[0] | ((uint32_t)f[1] << 8) | ((uint32_t)f[2] << 16) | ((uint32_t)f[3] << 24);
+        memcpy(rec_slot(s_count), f + 4, s_cfg.record_size);
+        s_count++;
+        s_refill_off++;
       }
+      save_all();
+      // Stop when the phone returned a short page (archive exhausted) or the cache filled.
+      if (cnt < s_inflight_size || s_count >= s_cfg.cache_capacity) s_refill_valid = false;
+      s_get_is_refill = false;
+      notify_state();
+      pump();                                                  // pull the next refill page if still wanted
+      return;
+    }
+
+    if (cnt > s_max_page) cnt = s_max_page;                    // s_page holds at most max_page records
+    for (uint8_t i = 0; i < cnt; i++) {
+      const uint8_t *f = src + (uint16_t)i * fs;
+      s_pageseq[i] = (uint32_t)f[0] | ((uint32_t)f[1] << 8) | ((uint32_t)f[2] << 16) | ((uint32_t)f[3] << 24);
+      memcpy(s_page + (uint16_t)i * s_cfg.record_size, f + 4, s_cfg.record_size);
     }
     if (s_cfg.on_page) s_cfg.on_page(s_cfg.ctx, s_page, s_pageseq, cnt, s_inflight_offset, s_total);
   }
@@ -278,7 +358,11 @@ static void on_outbox_failed(DictionaryIterator *it, AppMessageResult reason, vo
     s_await_ack = false;
     s_want_push = true;                                    // retry on next connect/sync
   } else if (s_tx == TX_GET) {
-    if (s_cfg.on_page) s_cfg.on_page(s_cfg.ctx, NULL, NULL, 0, s_inflight_offset, s_total);  // release UI
+    if (s_get_is_refill) {
+      s_get_is_refill = false;                                // keep s_refill_valid: retry on the next pump/connect
+    } else if (s_cfg.on_page) {
+      s_cfg.on_page(s_cfg.ctx, NULL, NULL, 0, s_inflight_offset, s_total);  // release UI
+    }
   }
   // TX_DEL: keep the tombstone; the pump retries it on the next connection.
   s_tx = TX_NONE;
@@ -407,6 +491,7 @@ void storage_sync_now(void) {
 bool storage_load_page(uint32_t page_index, uint8_t page_size) {
   if (!storage_connected()) return false;
   if (s_tx != TX_NONE || s_get_valid) return false;        // one request at a time
+  if (s_refill_valid || s_get_is_refill) return false;     // a post-reset cache refill owns the GET slot
   if (page_size < 1) page_size = 1;
   if (page_size > s_max_batch) page_size = s_max_batch;
   s_get_offset = page_index * page_size;

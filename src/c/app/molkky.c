@@ -101,6 +101,7 @@ static bool       s_can_undo;
 // domain adapter: it builds MKHistGame records, and forwards the lib's async
 // page / sync-state callbacks to whichever history view is listening.
 static MKHistListener s_hist_listener;
+static void stats_save(void);   // defined below; used by the reset callback
 static void store_on_page(void *ctx, const void *recs, const uint32_t *seqs, uint8_t count, uint32_t offset, uint32_t total) {
   if (s_hist_listener.on_page)
     s_hist_listener.on_page(s_hist_listener.ctx, (const MKHistGame *)recs, seqs, count, (int)offset, (int)total);
@@ -111,6 +112,14 @@ static void store_on_state(void *ctx, StorageSyncState st, uint16_t unsynced, ui
                  : st == STORAGE_BLOCKED ? MK_SYNC_BLOCKED
                                          : MK_SYNC_PENDING;
   s_hist_listener.on_state(s_hist_listener.ctx, ms, unsynced, (int)total);
+}
+// An explicit reset from the settings page wiped the archive (the store has
+// already cleared its history cache). The on-watch lifetime totals are kept
+// separately from the games, so clear them too — otherwise the watch would keep
+// showing stats for games that no longer exist.
+static void store_on_reset(void *ctx) {
+  memset(s_lifetime, 0, sizeof(s_lifetime));
+  stats_save();
 }
 
 // Tiny xorshift PRNG (avoids depending on libc rand()).
@@ -334,6 +343,7 @@ void mk_init(void) {
     .arena_size     = sizeof(s_store_arena),
     .on_page        = store_on_page,
     .on_state       = store_on_state,
+    .on_reset       = store_on_reset,
   });
   if (schema < 4) hist_import_legacy();   // one-time: move pre-v4 on-watch games into the store
 
