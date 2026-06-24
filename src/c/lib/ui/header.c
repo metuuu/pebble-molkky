@@ -54,16 +54,18 @@ static void header_update(Layer *layer, GContext *ctx) {
   int clock_x = b.origin.x + b.size.w - RPAD - tz.w;
   int pane_x  = clock_x - DIV_GAP;                         // left edge of the white pane
 
+  int pane_w = b.origin.x + b.size.w - pane_x;
   graphics_context_set_fill_color(ctx, GColorWhite);
-  graphics_fill_rect(ctx, GRect(pane_x, b.origin.y, b.origin.x + b.size.w - pane_x, b.size.h),
-                     0, GCornerNone);
-  // A 2px black border along the bottom of the white clock pane.
-  graphics_context_set_fill_color(ctx, GColorBlack);
-  graphics_fill_rect(ctx, GRect(pane_x, b.origin.y + b.size.h - 2,
-                                b.origin.x + b.size.w - pane_x, 2), 0, GCornerNone);
+  graphics_fill_rect(ctx, GRect(pane_x, b.origin.y, pane_w, b.size.h), 0, GCornerNone);
+  // A 3px gray frame on all four sides of the white clock pane.
+  graphics_context_set_fill_color(ctx, GColorDarkGray);
+  graphics_fill_rect(ctx, GRect(pane_x, b.origin.y, pane_w, 3), 0, GCornerNone);                       // top
+  graphics_fill_rect(ctx, GRect(pane_x, b.origin.y, 3, b.size.h), 0, GCornerNone);                     // left
+  graphics_fill_rect(ctx, GRect(b.origin.x + b.size.w - 3, b.origin.y, 3, b.size.h), 0, GCornerNone);  // right
+  graphics_fill_rect(ctx, GRect(pane_x, b.origin.y + b.size.h - 3, pane_w, 3), 0, GCornerNone);        // bottom
   graphics_context_set_text_color(ctx, GColorBlack);       // clock: dark ink on the white pane
   ui_text_draw(ctx, t, UI_FONT_BODY_BOLD,
-               GRect(clock_x, b.origin.y + TEXT_DY - 2, tz.w, b.size.h),
+               GRect(clock_x, b.origin.y + TEXT_DY - 1, tz.w, b.size.h),
                GTextAlignmentLeft, true, GTextOverflowModeFill);
 
   graphics_context_set_text_color(ctx, GColorWhite);       // title: light ink on the dark bar
