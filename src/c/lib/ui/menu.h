@@ -37,3 +37,6 @@ Window *menu_window(Menu *m);                        // for window_stack_remove
 // the next push or menu_reload.
 void    menu_set_header_enabled(bool enabled);
 bool    menu_header_enabled(void);
+// Global: a brand icon shown at the left of the header bar (a bitmap resource
+// id; 0 = none). Set once at startup. Shared with every header-bearing list.
+void    menu_set_header_icon(uint32_t res);

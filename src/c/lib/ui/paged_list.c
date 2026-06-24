@@ -2,6 +2,7 @@
 #include "ui_theme.h"
 #include "ui_text.h"
 #include "button.h"
+#include "header.h"
 
 // =============================================================================
 // paged_list — implementation. A MenuLayer (item rows, with its native scroll
@@ -22,6 +23,7 @@ struct PagedList {
   Window         *window;
   MenuLayer      *menu;
   Layer          *pager;
+  Header         *header;          // top title+clock bar, or NULL when not shown
   char            title[32];
   PagedListConfig cfg;
   bool            focus_pager;     // focus is in the pager bar (else in the list)
@@ -86,6 +88,9 @@ static bool pager_wanted(PagedList *p) {
   refresh_pm(p);
   return p->pm.has_prev || p->pm.has_next || p->pm.busy || p->pm.status[0];
 }
+// Space reserved at the top for the header bar (0 when there's no header).
+static int pl_top(PagedList *p) { return p->header ? HEADER_H : 0; }
+
 static void apply_pager_visibility(PagedList *p) {
   if (!p->pager) return;
   bool show = pager_wanted(p);
@@ -93,8 +98,9 @@ static void apply_pager_visibility(PagedList *p) {
   p->pager_laid_out = true;
   p->pager_shown = show;
   GRect rb = layer_get_bounds(window_get_root_layer(p->window));
+  int top = pl_top(p);
   layer_set_frame(menu_layer_get_layer(p->menu),
-                  GRect(0, 0, rb.size.w, rb.size.h - (show ? PAGER_H : 0)));
+                  GRect(0, top, rb.size.w, rb.size.h - top - (show ? PAGER_H : 0)));
   layer_set_hidden(p->pager, !show);
   if (!show && p->focus_pager) { p->focus_pager = false; apply_menu_focus(p); }
 }
@@ -243,7 +249,12 @@ static void pl_load(Window *w) {
   Layer *root = window_get_root_layer(w);
   GRect b = layer_get_bounds(root);
 
-  p->menu = menu_layer_create(GRect(0, 0, b.size.w, b.size.h));  // full height; trimmed if the pager shows
+  // Top header bar (title + clock + brand icon), when the app has it enabled.
+  if (header_enabled() && p->title[0])
+    p->header = header_create(root, p->title, header_icon());
+  int top = pl_top(p);
+
+  p->menu = menu_layer_create(GRect(0, top, b.size.w, b.size.h - top));  // trimmed further if the pager shows
   menu_layer_set_callbacks(p->menu, p, (MenuLayerCallbacks){
     .get_num_rows = mc_rows,
     .get_cell_height = mc_cell_h,
@@ -266,6 +277,7 @@ static void pl_unload(Window *w) {
   PagedList *p = window_get_user_data(w);
   if (p->cfg.on_unload) p->cfg.on_unload(p->cfg.ctx);
   for (int i = 0; i < p->icon_n; i++) if (p->icons[i].bmp) gbitmap_destroy(p->icons[i].bmp);
+  if (p->header) header_destroy(p->header);
   if (p->pager) layer_destroy(p->pager);
   menu_layer_destroy(p->menu);
   window_destroy(p->window);
