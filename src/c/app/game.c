@@ -410,8 +410,5 @@ static void result_push(void) {
   int32_t secs = (int32_t)time(NULL) - g->start_time;
   uint16_t duration = (secs > 0) ? (uint16_t)(secs / 60) : 0;
   uint8_t  settings = (mk_lose_on_3() ? MK_SET_LOSE3 : 0) | (mk_final_round() ? MK_SET_FINAL : 0);
-  char date[24];                                     // the just-finished game is dated "now"
-  time_t now = time(NULL);
-  strftime(date, sizeof date, "%b %d, %H:%M", localtime(&now));
-  results_view_push(date, rows, n, duration, settings, result_leave);
+  results_view_push(NULL, rows, n, duration, settings, result_leave);  // no date row post-game
 }
