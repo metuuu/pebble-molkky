@@ -92,7 +92,7 @@ static void confirm_delete_player(const char *name) {
 static void player_stats_push(int idx) {
   const MKLifetime *L = mk_stats_get(idx);
   Block b[7];
-  char v0[12], v1[20], v2[8], v3[16], v4[16];
+  char v0[12], v1[20], v2[8], v3[16];
   int n = 0;
   b[n++] = block_section(mk_stats_name(idx));
   if (!L || L->games == 0) {
@@ -113,9 +113,6 @@ static void player_stats_push(int idx) {
     snprintf(v3, sizeof v3, "%d.%d", pts10 / 10, pts10 % 10);
     b[n++] = block_field_inline("Pts / turn", v3);
   }
-  int plc10 = (int)((L->place_sum * 10u + L->games / 2) / L->games);
-  snprintf(v4, sizeof v4, "%d.%d", plc10 / 10, plc10 % 10);
-  b[n++] = block_field_inline("Avg place", v4);
   view_push(b, n, (ViewOpts){ .size = UI_SIZE_SM });
 }
 

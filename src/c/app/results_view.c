@@ -31,8 +31,12 @@ View *results_view_push(const char *title, const ResultRow *rows, int count,
                         uint16_t duration, uint8_t settings, void (*on_select)(void)) {
   (void)settings;                                    // rules row dropped; kept for API compatibility
   int n = 0;
-  snprintf(s_date, sizeof s_date, "%s", title ? title : "");
-  s_blocks[n++] = block_custom(4 + ui_font_cap(UI_FONT_BODY_BOLD) + 4, draw_date, NULL);
+  // The date row sits above the first section, but only when a title is given
+  // (the history detail screen); the post-game screen passes NULL to omit it.
+  if (title && title[0]) {
+    snprintf(s_date, sizeof s_date, "%s", title);
+    s_blocks[n++] = block_custom(4 + ui_font_cap(UI_FONT_BODY_BOLD) + 4, draw_date, NULL);
+  }
   s_blocks[n++] = block_section("Results");
   for (int i = 0; i < count && i < MK_MAX_PLAYERS; i++) {
     ListItem item = list_item_empty();
