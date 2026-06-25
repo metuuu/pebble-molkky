@@ -1,36 +1,78 @@
+<div align="center">
+
 # Mölkky
 
-A Pebble watchapp/watchface written in C using the Pebble SDK.
+**A scorekeeper for the Finnish lawn game [Mölkky](https://en.wikipedia.org/wiki/Mölkky), built for the Pebble smartwatch.**
 
-## Building & running
+Score up to 16 players, track lifetime stats, and keep a full game history that syncs to your phone.
+
+<br>
+
+<img src="screenshots/cover-image.png" width="200" alt="Mölkky">
+
+</div>
+
+---
+
+## Features
+
+| | |
+|---|---|
+| **Touch scoring** | Tap the 1–12 / MISS grid to record each throw — the only screen that uses touch. |
+| **Up to 16 players** | A persistent roster with rename, archive, and delete. Names entered via a multitap keyboard. |
+| **Rule options** | Toggle *lose from three misses* and a *final round* rule where players who reach 50 in the same round share a crown. |
+| **Undo** | One-level undo of the most recent throw. |
+| **History & stats** | Browse past games and per-player lifetime stats — accuracy, points per turn, wins, and average finish. |
+| **Phone sync** | The watch caches recent games offline; the full archive lives on the paired phone and backs up automatically. |
+
+## Controls
+
+Every screen except the throw grid is driven by the **physical buttons**
+(up / select / down / back). The **touch** screen is reserved for entering throw
+results, where speed matters most.
+
+## Screenshots
+
+<div align="center">
+
+| Main menu | Players | Keyboard |
+|:---:|:---:|:---:|
+| <img src="screenshots/main-menu.png" width="150"> | <img src="screenshots/players.png" width="150"> | <img src="screenshots/keyboard.png" width="150"> |
+| **In-game** | **Results** | **Player stats** |
+| <img src="screenshots/game.png" width="150"> | <img src="screenshots/results.png" width="150"> | <img src="screenshots/player-stats.png" width="150"> |
+
+</div>
+
+## Building
+
+Requires the [Pebble SDK](https://developer.repebble.com). The app targets
+**emery** (Pebble Time 2).
 
 ```sh
-pebble build                          # build for all targetPlatforms
-pebble install --emulator emery       # install on the emery emulator
+pebble build                          # compile the app
+pebble install --emulator emery       # run in the emulator
 pebble install --phone <ip>           # install to a paired phone
+pebble emu-app-config --emulator emery # open the settings page (export/import history)
 ```
 
-## Target platforms
-
-`targetPlatforms` in `package.json` controls which watches you build for. The
-modern Pebble hardware is **emery** (Pebble Time 2), **gabbro** (Pebble Round
-2), and **flint** (Pebble 2 Duo); the original Pebble platforms (aplite,
-basalt, chalk, diorite) are included by default for backwards compatibility.
-
-## Project layout
+## Architecture
 
 ```
-src/c/           C source for the watchapp
-src/pkjs/        PebbleKit JS (phone-side) source, if any
-worker_src/c/    Background worker source, if any
-resources/       Images, fonts, and other bundled resources
-package.json     Project metadata (UUID, platforms, resources, message keys)
-wscript          Build rules — usually no need to edit
+src/c/app/       Game model, logic, persistence, and app screens
+src/c/lib/       Reusable Pebble libraries — UI widgets, synced storage, multitap keyboard
+src/pkjs/        PebbleKit JS — phone-side history archive and settings page
+resources/       Icons (generated from SVG via tools/icon-converter)
+tools/           Icon converter and a native test harness for the storage library
+package.json     App metadata — UUID, target platform, resources, message keys
+wscript          Build rules
 ```
 
-By default this project is configured as a watchapp. To make it a watchface,
-set `pebble.watchapp.watchface` to `true` in `package.json`.
+The code under `src/c/lib/` is generic and theme-driven, so the UI
+widgets, storage, and keyboard can be reused across Pebble apps. Mölkky-specific
+presentation — crowns, medals, and standings — stays in `src/c/app/`. Game
+history is stored on the watch as a rolling cache and mirrored to the phone,
+which holds the complete archive.
 
-## Documentation
+## License
 
-Full SDK docs, tutorials, and API reference: <https://developer.repebble.com>
+Apache License 2.0 — see [LICENSE](LICENSE).
