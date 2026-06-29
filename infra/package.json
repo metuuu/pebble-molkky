@@ -7,6 +7,7 @@
   "scripts": {
     "build": "tsc",
     "synth": "cdk synth",
+    "put-secret": "node scripts/put-secret.mjs",
     "deploy": "cdk deploy",
     "diff": "cdk diff"
   },
@@ -19,6 +20,7 @@
   "dependencies": {
     "aws-cdk-lib": "^2.130.0",
     "constructs": "^10.3.0",
+    "dotenv": "^16.4.5",
     "source-map-support": "^0.5.21"
   }
 }

@@ -1,12 +1,40 @@
-# Mölkky cloud-backup infrastructure
+# Mölkky cloud-backup infrastructure (AWS)
 
 One AWS Lambda (behind a Function URL) that performs the GitHub OAuth
 **code → access-token** exchange for the Mölkky settings page. That exchange is
-the only step the static GitHub Pages settings page can't do itself (it can't
-hold the client secret, and GitHub's token endpoint sends no CORS headers).
+the only step the static GitHub Pages settings page can't do itself — it can't
+hold the client secret, and GitHub's token endpoint sends no CORS headers.
 
-Everything else — reading and writing the backup gist — happens in the watch's
-PebbleKit JS, not here. This stack is stateless and stores nothing.
+Everything else (reading/writing the backup gist) happens in the watch's
+PebbleKit JS, not here. This stack is stateless and stores no user data.
+
+```
+infra/
+  bin/app.ts          CDK app entry — reads config from .env
+  lib/oauth-stack.ts  the stack: one Lambda + Function URL
+  lambda/exchange.mjs  the handler (code -> token)
+  scripts/put-secret.mjs  pushes the client secret from .env into SSM
+  .env.example        copy to .env (gitignored) and fill in
+```
+
+## Prerequisites
+- Node.js 18+ and the AWS CLI configured (`aws configure`, or an `AWS_PROFILE`).
+- An AWS account you can deploy to.
+
+## Secrets & config: the `.env` file
+All deploy config lives in **`infra/.env`**, which is **gitignored** (this is a
+public repo — never commit real values). Start from the template:
+
+```sh
+cd infra
+cp .env.example .env       # then edit .env with your values
+npm install
+```
+
+`.env` holds your GitHub OAuth **client id** (not sensitive, kept here so nothing
+is hardcoded) and **client secret** (sensitive). The secret is never baked into
+the deployed template — `npm run put-secret` stores it in AWS SSM as a
+SecureString, and the Lambda reads it from there at runtime.
 
 ## One-time setup
 
@@ -14,29 +42,24 @@ PebbleKit JS, not here. This stack is stateless and stores nothing.
 GitHub → Settings → Developer settings → **OAuth Apps** → New OAuth App.
 - **Homepage URL:** `https://metuuu.github.io/pebble-molkky/`
 - **Authorization callback URL:** `https://metuuu.github.io/pebble-molkky/config.html`
-- After creating it, note the **Client ID** and generate a **Client secret**.
 
-(The `gist` scope is requested at sign-in time by the page, not configured here.)
+Copy the **Client ID** and generate a **Client secret** into `infra/.env`.
+(The `gist` scope is requested by the page at sign-in, not configured here.)
 
-### 2. Store the client secret in SSM (never in source control)
+### 2. Store the secret in SSM
 ```sh
-aws ssm put-parameter \
-  --name /molkky/github-oauth-client-secret \
-  --type SecureString \
-  --value 'YOUR_GITHUB_CLIENT_SECRET'
+npm run put-secret         # reads GITHUB_CLIENT_SECRET from .env -> AWS SSM
 ```
 
 ### 3. Deploy
 ```sh
-cd infra
-npm install
 npx cdk bootstrap          # first time in this account/region only
-npx cdk deploy -c githubClientId=YOUR_CLIENT_ID
+npm run deploy             # reads GITHUB_CLIENT_ID etc. from .env
 ```
-CDK prints `MolkkyGithubOAuth.ExchangeUrl` — the Function URL.
+CDK prints **`MolkkyGithubOAuth.ExchangeUrl`** — the Function URL.
 
 ### 4. Wire the page
-Open `docs/config.html` and fill the `CONFIG` block near the top:
+In `docs/config.html`, fill the `CONFIG` block near the top of the `<script>`:
 ```js
 var CONFIG = {
   clientId:    'YOUR_CLIENT_ID',
@@ -45,10 +68,20 @@ var CONFIG = {
 ```
 Commit and push; GitHub Pages already serves `docs/`.
 
+## Everyday commands
+```sh
+npm run diff     # preview changes before deploying
+npm run synth    # render the CloudFormation template locally
+npm run deploy   # deploy
+npx cdk destroy  # tear it all down
+```
+Rotate the secret anytime: edit `.env`, `npm run put-secret` (the next Lambda
+cold start picks it up). To change the client id or CORS origin, edit `.env` and
+`npm run deploy`.
+
 ## Notes
-- `allowOrigin` defaults to `https://metuuu.github.io` (CORS for the Function
-  URL). Override with `-c allowOrigin=...` if you host the page elsewhere.
-- The Lambda returns only `{ access_token, scope }`; it never logs or echoes the
+- `ALLOW_ORIGIN` (in `.env`) is the CORS origin allowed to call the Function URL;
+  defaults to `https://metuuu.github.io`.
+- The Lambda returns only `{ access_token, scope }` — it never logs or echoes the
   code or the secret.
-- To rotate the secret: update the SSM parameter; the next cold start picks it up.
-- Cost: effectively zero — a couple of invocations per user sign-in.
+- Cost is effectively zero: a couple of invocations per user sign-in.
