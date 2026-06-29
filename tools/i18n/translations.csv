@@ -113,3 +113,6 @@ STR_TITLE_CLOCK,Title and clock bar,Otsikko ja kellopalkki
 STR_PIN_ARTWORK,Pin artwork,Keilakuvitus
 STR_PIN_FORMATION,The 12-pin formation,12 keilan muodostelma
 STR_LANGUAGE,Language,Kieli
+STR_CLOUD_BACKUP,Cloud backup,Pilvivarmuuskopio
+STR_SIGN_IN_ON_PHONE,Sign in on your phone,Kirjaudu puhelimella
+STR_CLOUD_BACKUP_BODY,"Open Mölkky settings in the Pebble phone app, then Cloud backup, to sign in with GitHub.",Avaa Mölkky-asetukset Pebble-puhelinsovelluksessa ja valitse Pilvivarmuuskopio kirjautuaksesi GitHubiin.

@@ -102,6 +102,9 @@ static const char *const EN[STR__COUNT] = {
   [STR_PIN_ARTWORK        ] = "Pin artwork",
   [STR_PIN_FORMATION      ] = "The 12-pin formation",
   [STR_LANGUAGE           ] = "Language",
+  [STR_CLOUD_BACKUP       ] = "Cloud backup",
+  [STR_SIGN_IN_ON_PHONE   ] = "Sign in on your phone",
+  [STR_CLOUD_BACKUP_BODY  ] = "Open Mölkky settings in the Pebble phone app, then Cloud backup, to sign in with GitHub.",
 };
 
 // Suomi
@@ -202,6 +205,9 @@ static const char *const FI[STR__COUNT] = {
   [STR_PIN_ARTWORK        ] = "Keilakuvitus",
   [STR_PIN_FORMATION      ] = "12 keilan muodostelma",
   [STR_LANGUAGE           ] = "Kieli",
+  [STR_CLOUD_BACKUP       ] = "Pilvivarmuuskopio",
+  [STR_SIGN_IN_ON_PHONE   ] = "Kirjaudu puhelimella",
+  [STR_CLOUD_BACKUP_BODY  ] = "Avaa Mölkky-asetukset Pebble-puhelinsovelluksessa ja valitse Pilvivarmuuskopio kirjautuaksesi GitHubiin.",
 };
 
 static const char *const EN_MONTHS[12] = {
