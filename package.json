@@ -104,6 +104,21 @@
         },
         {
           "type": "bitmap",
+          "name": "IMAGE_HOME",
+          "file": "icons/home-sharp-24.png"
+        },
+        {
+          "type": "bitmap",
+          "name": "IMAGE_PLAY",
+          "file": "icons/play-24.png"
+        },
+        {
+          "type": "bitmap",
+          "name": "IMAGE_FLAG",
+          "file": "icons/flag-24.png"
+        },
+        {
+          "type": "bitmap",
           "name": "IMAGE_PAGER_FIRST",
           "file": "icons/chevron-first-24.png"
         },
