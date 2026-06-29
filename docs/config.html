@@ -88,6 +88,8 @@ textarea::placeholder{color:var(--muted)}
 .btn-primary:active{background:var(--accent-press)}
 .btn-danger{background:var(--danger);color:var(--on-danger);box-shadow:0 2px 8px rgba(229,72,77,.26)}
 .btn-danger:active{background:var(--danger-press)}
+.restore-row{margin-top:8px;font-weight:500;font-variant-numeric:tabular-nums}
+#gh-signout{margin-top:10px}
 
 .zone{background:var(--danger-zone-bg);border:1px solid var(--danger-zone-border);box-shadow:none}
 .zone .card-title{color:var(--danger-soft-text)}
@@ -121,6 +123,26 @@ textarea::placeholder{color:var(--muted)}
     </div>
     <div class="card">
       <div id="stats"></div>
+    </div>
+  </section>
+
+  <section id="cloud-section">
+    <h2 class="section-label">Cloud backup</h2>
+    <div class="card" id="cloud-signedout" hidden>
+      <div class="card-title">Back up to GitHub</div>
+      <p class="hint">Sign in with GitHub to automatically back up your games and players to a private gist in your own account. You can restore them on a new phone anytime.</p>
+      <button id="gh-signin" class="btn btn-primary" type="button">Sign in with GitHub</button>
+    </div>
+    <div class="card" id="cloud-signedin" hidden>
+      <div class="card-title">Backing up to GitHub</div>
+      <p class="hint" id="cloud-status">Signed in.</p>
+      <button id="gh-backup" class="btn btn-primary" type="button">Back up now</button>
+      <div id="cloud-restores"></div>
+      <button id="gh-signout" class="btn btn-neutral" type="button">Sign out</button>
+    </div>
+    <div class="card" id="cloud-finishing" hidden>
+      <div class="card-title">Finishing sign-in…</div>
+      <p class="hint">Completing GitHub sign-in — this will close in a moment.</p>
     </div>
   </section>
 
@@ -275,4 +297,122 @@ fileInput.onchange = function () {
 document.getElementById('reset').onclick = function () {
   close({ action: 'reset-request' });
 };
+
+// ---- Cloud backup (GitHub) --------------------------------------------------
+// Fill these after deploying the OAuth-exchange Lambda (see infra/README.md).
+// clientId is the GitHub OAuth App's public client id; exchangeUrl is the Lambda
+// Function URL that swaps an OAuth code for an access token.
+var CONFIG = {
+  clientId:    '',
+  exchangeUrl: ''
+};
+// The redirect target must exactly match the OAuth App's callback URL. Deriving it
+// from the current location keeps it correct wherever the page is hosted.
+var REDIRECT_URI = location.origin + location.pathname;
+
+var CLOUD = P.cloud || null;
+
+function qparam(name) {
+  var m = location.search.match(new RegExp('[?&]' + name + '=([^&]*)'));
+  return m ? decodeURIComponent(m[1]) : null;
+}
+function fmtDate(iso) {
+  if (!iso) return '';
+  var d = new Date(iso);
+  return isNaN(d.getTime()) ? iso : d.toLocaleString();
+}
+function showCloud(state) {
+  document.getElementById('cloud-signedout').hidden = state !== 'signedout';
+  document.getElementById('cloud-signedin').hidden  = state !== 'signedin';
+  document.getElementById('cloud-finishing').hidden = state !== 'finishing';
+}
+
+function renderRestores(list) {
+  var el = document.getElementById('cloud-restores');
+  if (!list || !list.length) { el.innerHTML = ''; return; }
+  var h = '<div class="card-title" style="margin-top:16px">Restore a backup</div>' +
+          '<p class="hint">Replace everything here and on the watch with a past backup.</p>';
+  var n = Math.min(list.length, 10);
+  for (var i = 0; i < n; i++) {
+    var label = fmtDate(list[i].date) || ('Backup ' + (i + 1));
+    h += '<button class="btn btn-neutral restore-row" type="button" data-v="' +
+         esc(list[i].version) + '" data-d="' + esc(label) + '">' + esc(label) + '</button>';
+  }
+  el.innerHTML = h;
+  var btns = el.querySelectorAll('.restore-row');
+  for (var j = 0; j < btns.length; j++) {
+    btns[j].onclick = function () {
+      var v = this.getAttribute('data-v'), d = this.getAttribute('data-d');
+      confirmDialog({
+        title: 'Restore this backup?',
+        text: 'This replaces every game and player here and on your watch with the backup from ' +
+              d + '. What’s here now will be gone.',
+        confirm: 'Restore'
+      }, function () { close({ action: 'restore', version: v }); });
+    };
+  }
+}
+
+function startSignin() {
+  if (!CONFIG.clientId) { toast('Cloud backup isn’t set up yet'); return; }
+  var state = String(Math.random()).slice(2) + String(Math.random()).slice(2);
+  try { sessionStorage.setItem('gh_state', state); } catch (e) {}
+  location.href = 'https://github.com/login/oauth/authorize' +
+    '?client_id=' + encodeURIComponent(CONFIG.clientId) +
+    '&scope=gist' +
+    '&redirect_uri=' + encodeURIComponent(REDIRECT_URI) +
+    '&state=' + encodeURIComponent(state);
+}
+
+// Returning from GitHub: ?code is present and there's no # payload. Swap the code
+// for a token via the Lambda, then hand the token to the watch and close.
+function finishSignin(code, state) {
+  showCloud('finishing');
+  var saved = null;
+  try { saved = sessionStorage.getItem('gh_state'); } catch (e) {}
+  if (saved && state && saved !== state) { toast('Sign-in could not be verified'); showCloud('signedout'); return; }
+  if (!CONFIG.exchangeUrl) { toast('Cloud backup isn’t set up yet'); showCloud('signedout'); return; }
+  var xhr = new XMLHttpRequest();
+  xhr.open('POST', CONFIG.exchangeUrl, true);
+  xhr.setRequestHeader('Content-Type', 'application/json');
+  xhr.onload = function () {
+    var d = null;
+    try { d = JSON.parse(xhr.responseText); } catch (e) {}
+    if (xhr.status === 200 && d && d.access_token) close({ action: 'github-auth', token: d.access_token });
+    else { toast('GitHub sign-in failed'); showCloud('signedout'); }
+  };
+  xhr.onerror = function () { toast('Could not reach the sign-in service'); showCloud('signedout'); };
+  xhr.send(JSON.stringify({ code: code, redirect_uri: REDIRECT_URI }));
+}
+
+document.getElementById('gh-signin').onclick = startSignin;
+document.getElementById('gh-backup').onclick = function () { close({ action: 'backup-now' }); };
+document.getElementById('gh-signout').onclick = function () {
+  confirmDialog({
+    title: 'Sign out of GitHub?',
+    text: 'Backups will stop until you sign in again. The backups already in your GitHub account are kept.',
+    confirm: 'Sign out'
+  }, function () { close({ action: 'github-signout' }); });
+};
+
+(function initCloud() {
+  var code = qparam('code');
+  if (code) {
+    // OAuth return: this load has no data payload, so hide the data sections and
+    // just finish signing in.
+    var secs = document.querySelectorAll('main > section');
+    for (var i = 0; i < secs.length; i++) if (secs[i].id !== 'cloud-section') secs[i].hidden = true;
+    finishSignin(code, qparam('state'));
+    return;
+  }
+  if (CLOUD && CLOUD.signedIn) {
+    showCloud('signedin');
+    var s = 'Signed in' + (CLOUD.login ? ' as ' + esc(CLOUD.login) : '') + '.';
+    if (CLOUD.lastBackup) s += ' Last backup ' + esc(fmtDate(CLOUD.lastBackup)) + '.';
+    document.getElementById('cloud-status').innerHTML = s;
+    renderRestores(CLOUD.backups || []);
+  } else {
+    showCloud('signedout');
+  }
+})();
 </script>

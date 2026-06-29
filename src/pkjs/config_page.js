@@ -17,13 +17,15 @@
 // chunked hand-off) rather than stuffing more into the fragment.
 //
 // Payload (JSON, URI-encoded):
-//   { raw: <string>, stats: <array>, count: <number>, players: <number> }
+//   { raw: <string>, stats: <array>, count: <number>, players: <number>, cloud: <object> }
 //
 //   raw     : the lossless snapshot, shown verbatim (Export — what Import eats).
 //   stats   : per-player lifetime aggregates (array of objects).
 //   count   : number of stored games.
 //   players : roster size (for the stats summary line) — distinct from
 //             stats.length, which only counts players that have played a game.
+//   cloud   : backup state for the GitHub section — { signedIn, login, lastBackup,
+//             backups:[{version,date}] }. See cloud.js status().
 //
 // Actions return to the app via `pebblejs://close#<encoded JSON>`, handled by
 // the `webviewclosed` listener in index.js.
@@ -35,8 +37,9 @@ var PAGE_URL = 'https://metuuu.github.io/pebble-molkky/config.html';
 
 // rawJson is already-stringified JSON (shown verbatim in the Export textarea);
 // statsJson is a stringified array (embedded as a live value); count and players
-// are numbers (stored games and roster size).
-function buildUrl(rawJson, statsJson, count, players) {
+// are numbers (stored games and roster size); cloud is the backup state object
+// (or null/undefined before the user has signed in).
+function buildUrl(rawJson, statsJson, count, players, cloud) {
   var stats;
   try { stats = statsJson ? JSON.parse(statsJson) : []; }
   catch (e) { stats = []; }
@@ -44,7 +47,8 @@ function buildUrl(rawJson, statsJson, count, players) {
     raw: String(rawJson),
     stats: stats,
     count: count | 0,
-    players: players | 0
+    players: players | 0,
+    cloud: cloud || null
   };
   return PAGE_URL + '#' + encodeURIComponent(JSON.stringify(payload));
 }

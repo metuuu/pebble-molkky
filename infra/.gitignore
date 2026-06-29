@@ -1,0 +1,11 @@
+node_modules/
+cdk.out/
+*.js
+*.d.ts
+!jest.config.js
+.cdk.staging/
+
+# Secrets / local config — never commit (public repo)
+.env
+.env.local
+.env.*.local

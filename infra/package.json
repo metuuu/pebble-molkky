@@ -1,0 +1,26 @@
+{
+  "name": "molkky-infra",
+  "version": "1.0.0",
+  "private": true,
+  "description": "CDK stack: one Lambda doing the GitHub OAuth code->token exchange for Mölkky cloud backup.",
+  "bin": { "molkky-infra": "bin/app.ts" },
+  "scripts": {
+    "build": "tsc",
+    "synth": "cdk synth",
+    "put-secret": "node scripts/put-secret.mjs",
+    "deploy": "cdk deploy",
+    "diff": "cdk diff"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "aws-cdk": "^2.130.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.3.3"
+  },
+  "dependencies": {
+    "aws-cdk-lib": "^2.130.0",
+    "constructs": "^10.3.0",
+    "dotenv": "^16.4.5",
+    "source-map-support": "^0.5.21"
+  }
+}

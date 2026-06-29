@@ -3,11 +3,12 @@
 #include "strings.h"
 #include "pins_art.h"
 #include "c/lib/ui/menu.h"
+#include "c/lib/ui/dialog.h"
 
 // =============================================================================
 // App settings, in two sections: "Gameplay" (lose-on-3, finish-round) and
-// "Other" (page header, pin artwork). Rows stay a flat list; the section map
-// just groups them.
+// "Other" (page header, pin artwork, language, cloud backup). Rows stay a flat
+// list; the section map just groups them.
 // (Named app_settings to avoid clashing with the keyboard's settings_window.)
 // =============================================================================
 
@@ -33,12 +34,12 @@ static void lang_push(void) {
   });
 }
 
-// Rows: "Other" gains a Language row after Pin artwork (flat index 4).
-enum { ST_LOSE3, ST_FINAL, ST_HEADER, ST_PINS, ST_LANG, ST_N };
+// Rows: "Other" holds Page header, Pin artwork, Language, then Cloud backup.
+enum { ST_LOSE3, ST_FINAL, ST_HEADER, ST_PINS, ST_LANG, ST_CLOUD, ST_N };
 
 static uint16_t st_count(void *c) { return ST_N; }
 static uint16_t st_sections(void *c) { return 2; }
-static uint16_t st_section_count(void *c, uint16_t s) { return s == 0 ? 2 : 3; }
+static uint16_t st_section_count(void *c, uint16_t s) { return s == 0 ? 2 : 4; }
 static const char *st_section_title(void *c, uint16_t s) { return s == 0 ? t(STR_SEC_GAMEPLAY) : t(STR_SEC_OTHER); }
 static void st_item(void *c, uint16_t i, ListItem *out) {
   if (i == ST_LOSE3) {
@@ -55,10 +56,14 @@ static void st_item(void *c, uint16_t i, ListItem *out) {
   } else if (i == ST_PINS) {
     snprintf(out->title, sizeof out->title, "%s", t(STR_PIN_ARTWORK));
     snprintf(out->subtitle, sizeof out->subtitle, "%s", t(STR_PIN_FORMATION));
-  } else {
+  } else if (i == ST_LANG) {
     snprintf(out->title, sizeof out->title, "%s", t(STR_LANGUAGE));
     snprintf(out->subtitle, sizeof out->subtitle, "%s", locale_autonym(mk_lang()));
     out->trailing = (Accessory){ .kind = ACC_CHEVRON };
+  } else {
+    snprintf(out->title, sizeof out->title, "%s", t(STR_CLOUD_BACKUP));
+    snprintf(out->subtitle, sizeof out->subtitle, "%s", t(STR_SIGN_IN_ON_PHONE));
+    out->trailing = (Accessory){ .kind = ACC_ICON, .icon_res = RESOURCE_ID_IMAGE_INFO };
   }
 }
 static void st_select(void *c, uint16_t i) {
@@ -66,7 +71,17 @@ static void st_select(void *c, uint16_t i) {
   else if (i == ST_FINAL)  { mk_set_final_round(!mk_final_round()); menu_reload(s_menu); }
   else if (i == ST_HEADER) { mk_set_show_header(!mk_show_header()); menu_reload(s_menu); }
   else if (i == ST_PINS)   pins_art_push();
-  else                     lang_push();
+  else if (i == ST_LANG)   lang_push();
+  else {
+    // The watch can't open the phone's Pebble app settings (no API), so point the
+    // user there. Sign-in and the GitHub backup itself live on the phone side.
+    dialog_push((DialogConfig){
+      .title = t(STR_CLOUD_BACKUP),
+      .text  = t(STR_CLOUD_BACKUP_BODY),
+      .buttons = { { .label = t(STR_OK), .scheme = UI_BTN_NEUTRAL } },
+      .button_count = 1,
+    });
+  }
 }
 
 void app_settings_push(void) {
