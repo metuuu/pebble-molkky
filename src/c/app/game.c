@@ -177,11 +177,15 @@ static void game_menu_select(void *c, uint16_t i) {
 static uint16_t game_menu_count(void *c) { return 4; }
 static void game_menu_item(void *c, uint16_t i, ListItem *out) {
   switch (i) {
-    case GM_MAIN:    snprintf(out->title, sizeof out->title, "Main menu");    break;
-    case GM_RESUME:  snprintf(out->title, sizeof out->title, "Resume game");  break;
+    case GM_MAIN:    snprintf(out->title, sizeof out->title, "Main menu");
+                     out->leading = (Accessory){ .kind = ACC_ICON, .icon_res = RESOURCE_ID_IMAGE_HOME }; break;
+    case GM_RESUME:  snprintf(out->title, sizeof out->title, "Resume game");
+                     out->leading = (Accessory){ .kind = ACC_ICON, .icon_res = RESOURCE_ID_IMAGE_PLAY }; break;
     case GM_END:     snprintf(out->title, sizeof out->title, "End game");
+                     out->leading = (Accessory){ .kind = ACC_ICON, .icon_res = RESOURCE_ID_IMAGE_FLAG };
                      out->danger = true; break;
     default:         snprintf(out->title, sizeof out->title, "Discard game");
+                     out->leading = (Accessory){ .kind = ACC_ICON, .icon_res = RESOURCE_ID_IMAGE_DELETE };
                      out->danger = true; break;
   }
 }

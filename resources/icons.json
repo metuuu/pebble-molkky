@@ -28,6 +28,9 @@
     { "name": "INFO",      "from": "info-box" },
     { "name": "UNDO",      "from": "undo" },
     { "name": "ARCHIVE",   "from": "archive" },
+    { "name": "HOME",      "from": "home-sharp" },
+    { "name": "PLAY",      "from": "play" },
+    { "name": "FLAG",      "from": "flag" },
 
     { "name": "PAGER_FIRST", "from": "local:chevron-first" },
     { "name": "PAGER_PREV",  "from": "chevron-left" },
