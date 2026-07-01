@@ -119,6 +119,60 @@ static void lc_skip_disabled(ListCore *c) {
   }
 }
 
+// --- interactive navigation with edge wrap -----------------------------------
+// Pebble's MenuLayer stops dead at the first/last row. For interactive menus we
+// install our own click config so Up on the first row wraps to the last and Down
+// on the last wraps to the first; every step in between moves normally (and still
+// animates/scrolls, since we drive it through menu_layer_set_selected_*).
+#define LC_REPEAT_MS 100   // held Up/Down repeat interval
+
+static MenuIndex lc_first_index(ListCore *c) {
+  uint16_t nsec = lc_sections(NULL, c);
+  for (uint16_t s = 0; s < nsec; s++)
+    if (lc_rows(NULL, s, c) > 0) return MenuIndex(s, 0);
+  return MenuIndex(0, 0);
+}
+static MenuIndex lc_last_index(ListCore *c) {
+  uint16_t nsec = lc_sections(NULL, c);
+  for (int s = (int)nsec - 1; s >= 0; s--) {
+    uint16_t n = lc_rows(NULL, (uint16_t)s, c);
+    if (n > 0) return MenuIndex((uint16_t)s, n - 1);
+  }
+  return MenuIndex(0, 0);
+}
+static bool lc_index_eq(MenuIndex a, MenuIndex b) {
+  return a.section == b.section && a.row == b.row;
+}
+
+static void lc_click_up(ClickRecognizerRef ref, void *ctx) {
+  ListCore *c = ctx;
+  MenuIndex cur = menu_layer_get_selected_index(c->menu);
+  if (lc_index_eq(cur, lc_first_index(c)))                // at the top → wrap to the bottom
+    menu_layer_set_selected_index(c->menu, lc_last_index(c), MenuRowAlignCenter, true);
+  else
+    menu_layer_set_selected_next(c->menu, true, MenuRowAlignCenter, true);
+}
+static void lc_click_down(ClickRecognizerRef ref, void *ctx) {
+  ListCore *c = ctx;
+  MenuIndex cur = menu_layer_get_selected_index(c->menu);
+  if (lc_index_eq(cur, lc_last_index(c)))                 // at the bottom → wrap to the top
+    menu_layer_set_selected_index(c->menu, lc_first_index(c), MenuRowAlignCenter, true);
+  else
+    menu_layer_set_selected_next(c->menu, false, MenuRowAlignCenter, true);
+}
+static void lc_click_select(ClickRecognizerRef ref, void *ctx) {
+  ListCore *c = ctx;
+  MenuIndex idx = menu_layer_get_selected_index(c->menu);
+  lc_select(c->menu, &idx, c);
+}
+static void lc_click_back(ClickRecognizerRef ref, void *ctx) { window_stack_pop(true); }
+static void lc_click_config(void *ctx) {
+  window_single_repeating_click_subscribe(BUTTON_ID_UP, LC_REPEAT_MS, lc_click_up);
+  window_single_repeating_click_subscribe(BUTTON_ID_DOWN, LC_REPEAT_MS, lc_click_down);
+  window_single_click_subscribe(BUTTON_ID_SELECT, lc_click_select);
+  window_single_click_subscribe(BUTTON_ID_BACK, lc_click_back);
+}
+
 // Reconcile the header with the current setting + title, and size the menu to
 // the space that's left. Idempotent: safe to call on load and on every reload.
 static void lc_layout(ListCore *c) {
@@ -169,7 +223,11 @@ static void lc_load(Window *w) {
     menu_layer_set_highlight_colors(c->menu, ui_accent(), ui_accent_text());
   else
     menu_layer_set_highlight_colors(c->menu, ui_background(), ui_text());   // no cursor on a display list
-  menu_layer_set_click_config_onto_window(c->menu, w);   // Up/Down scroll, Select, Back pops
+  if (c->cfg.interactive)
+    // Our own config: Up/Down step with edge wrap, Select fires, Back pops.
+    window_set_click_config_provider_with_context(w, lc_click_config, c);
+  else
+    menu_layer_set_click_config_onto_window(c->menu, w);   // display list: plain Up/Down scroll
   layer_add_child(root, menu_layer_get_layer(c->menu));
   lc_layout(c);          // add the header (if enabled) and size the menu below it
   lc_skip_disabled(c);   // don't render the first frame with a disabled row focused
