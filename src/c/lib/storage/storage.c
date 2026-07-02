@@ -117,8 +117,8 @@ static bool     s_want_wipe;          // storage_reset queued a store-wide wipe
 static bool     s_page_pending;       // a UI page fetch is queued
 static uint32_t s_page_offset;
 static uint8_t  s_page_size;
-static bool     s_refill_pending;     // rebuild the cache after a phone-side import
-static uint32_t s_refill_off;         // next archive offset to pull into the cache
+static bool     s_refill_pending;     // pull archive records into free cache slots
+                                      //   (armed by arm_refill_if_needed; offset derived)
 
 // Aux blob (one opaque app value, e.g. the roster) synced on the same channel. The
 // lib keeps only a pointer to caller-owned memory (no copy, not persisted) and
@@ -327,14 +327,27 @@ static bool begin_aux(void) {
   s_inflight = JOB_AUX;                                    // no ACK — completes on outbox-sent
   return true;
 }
+// The refill intent is derived, not persisted: the cache should be pulling from
+// the archive whenever it has room and the archive holds records it lacks
+// (total > count). The cache always mirrors archive offsets 0..count-1 once the
+// write backlog drains — and writes drain ahead of any read (pump priority) —
+// so `count` doubles as the next offset to pull. Re-deriving on every ACK/HELLO
+// makes the cache self-healing: a refill interrupted by an app exit resumes on
+// the next contact instead of leaving page 0 empty forever, and a delete's
+// freed slot backfills from the archive.
+static void arm_refill_if_needed(void) {
+  if (s_refill_pending || s_want_wipe) return;
+  if (s_count >= s_cfg.cache_capacity || s_total <= s_count) return;
+  s_refill_pending = true;
+}
 static bool begin_refill(void) {
   if (!s_refill_pending) return false;
-  if (s_refill_off >= s_total) { s_refill_pending = false; return false; }  // whole archive pulled
+  if (s_total <= s_count) { s_refill_pending = false; return false; }       // nothing the cache lacks
   uint8_t want = (uint8_t)(s_cfg.cache_capacity - s_count);
   if (want > s_max_batch) want = s_max_batch;
   if (want == 0) { s_refill_pending = false; return false; }                // cache already full
-  if (!send_get(s_refill_off, want)) return false;
-  s_inflight = JOB_REFILL; s_inflight_offset = s_refill_off; s_inflight_size = want;
+  if (!send_get(s_count, want)) return false;
+  s_inflight = JOB_REFILL; s_inflight_offset = s_count; s_inflight_size = want;
   return true;
 }
 
@@ -408,8 +421,8 @@ static void adopt_phone_archive(uint32_t epoch, uint32_t high, uint32_t total) {
 
   // Refill behind the kept records. They re-push first (pump priority), so by
   // the time the refill reads, archive offsets 0..keep-1 are those very records.
-  s_refill_pending = total > 0 && s_count < s_cfg.cache_capacity;
-  s_refill_off     = keep;
+  s_refill_pending = false;
+  arm_refill_if_needed();
   invalidate_inflight_read();                                  // a read in flight queried the old archive
   if (s_inflight == JOB_PUSH || s_inflight == JOB_DEL || s_inflight == JOB_WIPE)
     s_inflight = JOB_NONE;                                     // its reply will never come
@@ -494,6 +507,7 @@ static void on_inbox(DictionaryIterator *it, void *context) {
     if (s_inflight == JOB_WIPE) { s_want_wipe = false; tomb_save(); }   // intent delivered
     if (s_inflight == JOB_PUSH || s_inflight == JOB_DEL || s_inflight == JOB_WIPE)
       s_inflight = JOB_NONE;
+    arm_refill_if_needed();       // the total moved — backfill any free cache slots
     notify_state();
     pump();                                                // next batch / delete, or a queued read
   } else if (type == ST_HELLO) {
@@ -501,6 +515,7 @@ static void on_inbox(DictionaryIterator *it, void *context) {
     // size and kick any queued work (offline backlog, tombstones, refill).
     Tuple *t = dict_find(it, MESSAGE_KEY_st_total);
     if (t) s_total = t->value->uint32;
+    arm_refill_if_needed();       // resumes a refill an app exit interrupted
     notify_state();
     pump();
   } else if (type == ST_WIPE_REQ) {
@@ -539,7 +554,6 @@ static void on_inbox(DictionaryIterator *it, void *context) {
       for (uint8_t i = 0; i < cnt && s_count < s_cfg.cache_capacity; i++) {
         const uint8_t *f = src + (uint16_t)i * fs;
         uint32_t sq = (uint32_t)f[0] | ((uint32_t)f[1] << 8) | ((uint32_t)f[2] << 16) | ((uint32_t)f[3] << 24);
-        s_refill_off++;
         bool held = false;
         for (uint8_t j = 0; j < s_count; j++) if (s_seq[j] == sq) { held = true; break; }
         if (held) continue;
@@ -638,7 +652,8 @@ void storage_open(const StorageConfig *cfg) {
   // Transient channel state is not persisted: a fresh open (real restart, or a
   // re-open) has nothing in flight and no queued read/aux. Tombstones, the wipe
   // intent (both loaded above) and unsynced cache records are the sync work
-  // that survives a restart.
+  // that survives a restart; an interrupted cache refill needs nothing here —
+  // it is re-derived from the totals on the next HELLO/ACK (arm_refill_if_needed).
   s_inflight = JOB_NONE;
   s_page_pending = false; s_refill_pending = false; s_aux_dirty = false;
 
@@ -767,8 +782,10 @@ void storage_sync_now(void) {
 bool storage_load_page(uint32_t page_index, uint8_t page_size) {
   if (!s_rec) return false;                                    // never opened (arena missing)
   if (!storage_connected()) return false;
-  if (s_inflight != JOB_NONE || s_page_pending) return false;  // one request at a time
-  if (s_refill_pending) return false;                          // a post-import cache refill owns the read slot
+  if (s_page_pending || s_inflight == JOB_PAGE) return false;  // one page request at a time
+  // Anything else on the wire (a push batch, a refill chunk) just delays the
+  // fetch: it queues here and pump serves it once the channel frees — after the
+  // write backlog (sync-then-fetch) but ahead of the background refill.
   if (page_size < 1) page_size = 1;
   if (page_size > s_max_batch) page_size = s_max_batch;
   s_page_offset = page_index * page_size;

@@ -408,6 +408,65 @@ static void t_alien_schema_store_discarded(void) {
   ASSERT_EQ(storage_cache_count(), 0, "old-schema store starts fresh");
 }
 
+// An import adopted right before the app closes leaves the cache empty with the
+// refill undone — and the refill intent is not persisted. It is derived state,
+// so the next launch's HELLO re-arms it and page 0 repopulates instead of
+// showing "no games" forever against a correct total.
+static void t_interrupted_refill_resumes_on_next_contact(void) {
+  fake_init(); fake_set_connected(true, false); open_store();
+  append_val(1);
+  fake_channel_drain();
+
+  uint32_t seqs[3] = {10, 11, 12};
+  uint8_t  recs[3 * REC] = {0};
+  fake_phone_import(seqs, recs, 3, REC);
+  fake_deliver_one_inbox();                        // RELOAD adopted; a refill GET is on the wire
+  ASSERT_EQ(storage_cache_count(), 0, "cache dropped on adopt");
+
+  open_store();                                    // app exits mid-refill and relaunches
+  ASSERT_EQ(storage_cache_count(), 0, "cache still empty after the restart");
+  fake_phone_hello();                              // PKJS launches alongside the watchapp
+  fake_channel_drain();
+  ASSERT_EQ(storage_cache_count(), 3, "HELLO re-armed the refill; cache repopulated");
+  ASSERT_EQ(storage_cache_seq(0), 12, "newest record first");
+  ASSERT_EQ(storage_total(), 3, "total known");
+}
+
+// While the post-import refill is still pulling, the user can already page: the
+// request queues behind the in-flight refill chunk and is served ahead of the
+// refill's next chunk, instead of being refused outright.
+static void t_page_load_queues_during_refill(void) {
+  fake_init(); fake_set_connected(true, false); open_store();
+  uint32_t seqs[5] = {10, 11, 12, 13, 14};
+  uint8_t  recs[5 * REC] = {0};
+  fake_phone_import(seqs, recs, 5, REC);
+  fake_deliver_one_inbox();                        // RELOAD adopted; a refill GET is on the wire
+  ASSERT(fake_outbox_pending(), "a refill chunk is in flight");
+
+  g_page_count = -1;
+  ASSERT(storage_load_page(2, PAGE), "page request accepted during the refill");
+  fake_channel_drain();
+  ASSERT_EQ(g_page_count, 1, "page delivered (offset 4 holds one record)");
+  ASSERT_EQ(g_page_offset, 4, "requested offset");
+  ASSERT_EQ(g_page_seqs[0], 10, "oldest record served");
+  ASSERT_EQ(storage_cache_count(), CAP, "the refill still ran to completion");
+}
+
+// Deleting a cached record frees a slot; the DEL's ACK re-arms the refill and
+// the cache backfills from the archive instead of shrinking for good.
+static void t_delete_backfills_cache(void) {
+  fake_init(); fake_set_connected(true, false); open_store();
+  for (int i = 0; i < 6; i++) { append_val(i + 1); fake_channel_drain(); }  // archive 6; cache newest 4
+  ASSERT_EQ(storage_cache_count(), CAP, "cache full");
+
+  ASSERT(storage_delete(storage_cache_seq(1)), "delete a cached record");
+  ASSERT_EQ(storage_cache_count(), CAP - 1, "slot freed locally");
+  fake_channel_drain();                            // DEL drains; its ACK re-arms the refill
+  ASSERT_EQ(storage_cache_count(), CAP, "cache backfilled from the archive");
+  ASSERT_EQ(storage_cache_seq(CAP - 1), 2, "next-oldest archive record pulled in");
+  ASSERT_EQ(storage_total(), 5, "archive total reflects the delete");
+}
+
 // Paging beyond the local cache: sync-then-fetch returns the requested page.
 static void t_load_page(void) {
   fake_init(); fake_set_connected(true, false); open_store();
@@ -460,6 +519,9 @@ int main(void) {
   fails += run("reload_preserves_unsynced", t_reload_preserves_unsynced);
   fails += run("alien_schema_page_refused", t_alien_schema_page_refused);
   fails += run("alien_schema_store_discarded", t_alien_schema_store_discarded);
+  fails += run("interrupted_refill_resumes_on_next_contact", t_interrupted_refill_resumes_on_next_contact);
+  fails += run("page_load_queues_during_refill", t_page_load_queues_during_refill);
+  fails += run("delete_backfills_cache", t_delete_backfills_cache);
   fails += run("load_page", t_load_page);
   printf("%s (%d failing)\n", fails ? "SOME TESTS FAILED" : "ALL TESTS PASSED", fails);
   return fails ? 1 : 0;

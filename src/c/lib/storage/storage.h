@@ -182,5 +182,7 @@ void             storage_sync_now(void);    // push unsynced if connected (else 
 // ---- paging from the phone (sync-then-fetch) ----
 // Fetch page `page_index` of `page_size` records (newest-first), syncing first.
 // Result arrives via on_page. Returns false if the phone is unreachable or a
-// request is already in flight.
+// page request is already pending. Other traffic on the wire (a push batch, a
+// post-import cache refill chunk) only delays the fetch — it queues and is
+// served as soon as the channel frees.
 bool storage_load_page(uint32_t page_index, uint8_t page_size);

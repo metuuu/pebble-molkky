@@ -24,8 +24,10 @@ static int         s_unsynced;
 static MKSyncState s_sync;
 static bool        s_busy;                   // a phone page fetch is in flight
 
-// Selected row for the results -> action menu -> delete flow.
-static int         s_sel_idx = -1;
+// Selected game for the results -> action menu -> delete flow, keyed by its
+// store seq: the page-0 rows refresh underneath an open results view when the
+// cache changes (e.g. the refill after a restore), so a row index can't be trusted.
+static uint32_t    s_sel_seq;
 static View       *s_results_view;           // the open results screen (to unwind on delete)
 static Menu       *s_actions_menu;           // the {Go back, Delete} menu over it
 
@@ -107,7 +109,7 @@ static void h_item(void *c, uint16_t i, ListItem *out) {
 }
 static void h_select(void *c, uint16_t i) {
   if (s_view_count == 0) return;
-  s_sel_idx = i;                          // remember the row for the delete flow
+  s_sel_seq = s_view_seq[i];              // remember the game for the delete flow
   open_results(&s_view[i]);
 }
 
@@ -123,10 +125,12 @@ static void refresh_after_delete(void) {
 }
 
 static void do_delete(void *ctx) {
-  if (s_sel_idx >= 0 && s_sel_idx < s_view_count) {
-    uint32_t seq = s_view_seq[s_sel_idx];
-    MKHistGame g = s_view[s_sel_idx];                          // stack copy drives the stats subtraction
-    if (!mk_hist_delete(seq, &g)) {                            // stats + cache + phone tombstone
+  int idx = -1;
+  for (int i = 0; i < s_view_count; i++)
+    if (s_view_seq[i] == s_sel_seq) { idx = i; break; }        // absent → already gone; just unwind
+  if (idx >= 0) {
+    MKHistGame g = s_view[idx];                                // stack copy drives the stats subtraction
+    if (!mk_hist_delete(s_sel_seq, &g)) {                      // stats + cache + phone tombstone
       // The offline-delete backlog is full; nothing was removed. Say so and
       // stay put — a sync drains the backlog and the delete works again.
       dialog_push((DialogConfig){
@@ -226,6 +230,14 @@ static void on_state(void *ctx, MKSyncState state, int unsynced, int total) {
   s_sync = state;
   s_unsynced = unsynced;
   if (total > 0) s_total = total;
+  if (s_page == 0) {
+    // Page 0 mirrors the watch cache, which changes underneath the list when a
+    // restore empties it, the post-import refill repopulates it, or a game is
+    // recorded — re-read it so the rows track the cache instead of going stale.
+    int before = s_view_count;
+    fill_local_page0();
+    if (before != s_view_count && s_pl) { paged_list_top(s_pl); return; }
+  }
   if (s_pl) paged_list_reload(s_pl);
 }
 
