@@ -121,6 +121,9 @@ typedef struct StorageConfig {
 
 // Load persisted state and open the AppMessage channel. Call once at startup.
 // A best-effort sync is attempted immediately and on every phone (re)connect.
+// If open is never called (e.g. the caller's arena allocation failed), the
+// mutating entry points below are inert: append returns 0, delete/load_page
+// return false, reset does nothing.
 void storage_open(const StorageConfig *cfg);
 
 // Append a record (copies record_size bytes, assigns the next seq). Returns the

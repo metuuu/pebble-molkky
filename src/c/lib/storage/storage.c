@@ -666,6 +666,7 @@ void storage_open(const StorageConfig *cfg) {
 }
 
 uint32_t storage_append(const void *record) {
+  if (!s_rec) return 0;                                    // never opened (arena missing)
   if (calc_state() == STORAGE_BLOCKED) return 0;
   uint32_t seq = s_next_seq++;
   if (s_next_seq == 0) s_next_seq = 1;                     // (unreachable) wrap guard
@@ -689,7 +690,7 @@ const void *storage_cache_get(uint8_t i) { return i < s_count ? rec_slot(i) : NU
 uint32_t    storage_cache_seq(uint8_t i) { return i < s_count ? s_seq[i] : 0; }
 
 bool storage_delete(uint32_t seq) {
-  if (seq == 0) return false;
+  if (!s_rec || seq == 0) return false;                    // never opened / no seq
   // A synced record needs a tombstone, or its phone copy resurrects on the next
   // page read. With the offline-delete backlog full, refuse the delete outright
   // — the caller keeps consistent state and can retry after a sync drains it.
@@ -729,6 +730,7 @@ void storage_set_aux(const void *data, uint16_t len) {
 }
 
 void storage_reset(void) {
+  if (!s_rec) return;                                      // never opened (arena missing)
   // Wipe the on-watch cache and pending deletes. s_next_seq stays monotonic so a
   // game recorded after the reset still gets a fresh seq (the phone is empty, so it
   // can't collide). acked/total drop to 0 — the archive is now empty everywhere.
@@ -762,6 +764,7 @@ void storage_sync_now(void) {
 }
 
 bool storage_load_page(uint32_t page_index, uint8_t page_size) {
+  if (!s_rec) return false;                                    // never opened (arena missing)
   if (!storage_connected()) return false;
   if (s_inflight != JOB_NONE || s_page_pending) return false;  // one request at a time
   if (s_refill_pending) return false;                          // a post-import cache refill owns the read slot
