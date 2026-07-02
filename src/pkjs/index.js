@@ -45,7 +45,12 @@ Pebble.addEventListener('webviewclosed', function (e) {
   if (!e || !e.response) return;
   var res;
   try { res = JSON.parse(decodeURIComponent(e.response)); }
-  catch (err) { console.log('config: bad response'); return; }
+  catch (err) {
+    // Some platforms deliver the response already decoded — then a literal `%`
+    // in it (e.g. in a player name) makes decodeURIComponent throw. Parse raw.
+    try { res = JSON.parse(e.response); }
+    catch (err2) { console.log('config: bad response'); return; }
+  }
   if (res.action === 'reset-request') {         // user asked to wipe — the watch confirms, then wipes both sides
     try {
       history.requestWipe();

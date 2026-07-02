@@ -329,7 +329,11 @@ document.getElementById('ex-copy').onclick = function () {
 };
 
 document.getElementById('export').onclick = function () {
-  if (!RAW) { toast('Nothing to export yet'); return; }
+  if (!RAW) {
+    toast(P.rawTooBig ? 'The archive is too large to export from this page'
+                      : 'Nothing to export yet');
+    return;
+  }
   showExportModal();
 };
 

@@ -36,6 +36,10 @@ var PAGE_URL = 'https://metuuu.github.io/pebble-molkky/config.html';
 // rawJson is already-stringified JSON (shown verbatim in the Export textarea);
 // statsJson is a stringified array (embedded as a live value); count and players
 // are numbers (stored games and roster size).
+// Longest URL we trust openURL/the webview to carry intact. Beyond it the page
+// would load with a truncated fragment and silently show nothing.
+var MAX_URL = 100000;
+
 function buildUrl(rawJson, statsJson, count, players) {
   var stats;
   try { stats = statsJson ? JSON.parse(statsJson) : []; }
@@ -46,7 +50,16 @@ function buildUrl(rawJson, statsJson, count, players) {
     count: count | 0,
     players: players | 0
   };
-  return PAGE_URL + '#' + encodeURIComponent(JSON.stringify(payload));
+  var url = PAGE_URL + '#' + encodeURIComponent(JSON.stringify(payload));
+  if (url.length > MAX_URL) {
+    // Ship everything but the snapshot, and say why — the page then explains
+    // that the archive is too large to export from here instead of pretending
+    // there is nothing to export.
+    payload.raw = '';
+    payload.rawTooBig = true;
+    url = PAGE_URL + '#' + encodeURIComponent(JSON.stringify(payload));
+  }
+  return url;
 }
 
 module.exports = { buildUrl: buildUrl };
