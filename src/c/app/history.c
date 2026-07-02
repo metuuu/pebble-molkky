@@ -13,8 +13,10 @@
 #define HIST_PAGE_SIZE MK_HIST_PAGE   // page size == the store's max_page (molkky.c)
 
 static PagedList  *s_pl;
-static MKHistGame  s_view[HIST_PAGE_SIZE];   // the games on the current page
-static uint32_t    s_view_seq[HIST_PAGE_SIZE]; // each game's store key (for delete), parallel to s_view
+// The page buffers live on the heap (allocated at first open, kept for the app's
+// lifetime) so they don't count against the app image's 64 KB header size field.
+static MKHistGame *s_view;                   // [HIST_PAGE_SIZE] the games on the current page
+static uint32_t   *s_view_seq;               // each game's store key (for delete), parallel to s_view
 static int         s_view_count;
 static int         s_page;                   // current page index (0-based)
 static int         s_total;                  // best-known archive size (0 = unknown)
@@ -211,6 +213,11 @@ static void on_state(void *ctx, MKSyncState state, int unsynced, int total) {
 }
 
 void history_push(void) {
+  if (!s_view) {
+    s_view     = calloc(HIST_PAGE_SIZE, sizeof *s_view);
+    s_view_seq = calloc(HIST_PAGE_SIZE, sizeof *s_view_seq);
+    if (!s_view || !s_view_seq) return;                    // ~1 KB at first open; cannot realistically fail
+  }
   s_page = 0;
   s_busy = false;
   s_sync = mk_hist_sync_state();

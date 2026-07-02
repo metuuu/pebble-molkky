@@ -65,8 +65,11 @@ typedef struct {
 typedef struct { uint8_t count, current, group_base; bool finishing, playout, finished;
                  int32_t start; } GameHdr;
 
-static MKRosterEntry s_roster[MK_MAX_PLAYERS];
-static MKLifetime    s_lifetime[MK_MAX_PLAYERS];  // parallel to s_roster, by slot
+// Heap-allocated once in mk_init and never freed (app-lifetime state). On the
+// heap rather than static so it doesn't count against the app image's 64 KB
+// header size field — text+data+bss must fit it, heap allocations don't.
+static MKRosterEntry *s_roster;      // [MK_MAX_PLAYERS]
+static MKLifetime    *s_lifetime;    // [MK_MAX_PLAYERS], parallel to s_roster, by slot
 static int           s_roster_count;   // active + archived (total entries)
 static uint8_t       s_next_id = 1;    // 0 is reserved as "no player"
 static bool       s_lose_on_3 = true;
@@ -173,7 +176,8 @@ static void stats_save(void) {
 // name, then MKLifetime fields. Keep in lockstep with molkky_history.js.
 #define PB_VER   1
 #define PB_ENTRY (2 + MK_MAX_NAME + (2 + 2 + 4 + 4 + 4 + 2))
-static uint8_t s_player_blob[4 + MK_MAX_PLAYERS * PB_ENTRY];
+#define PB_BLOB_BYTES (4 + MK_MAX_PLAYERS * PB_ENTRY)
+static uint8_t *s_player_blob;       // [PB_BLOB_BYTES], heap (see s_roster note)
 
 static void pb_w16(uint8_t *p, uint16_t v) { p[0] = v; p[1] = v >> 8; }
 static void pb_w32(uint8_t *p, uint32_t v) { p[0] = v; p[1] = v >> 8; p[2] = v >> 16; p[3] = v >> 24; }
@@ -213,7 +217,7 @@ static void players_apply(const uint8_t *b, uint16_t len) {
   if (!b || len < 4 || b[0] != PB_VER) return;
   int n = b[1] > MK_MAX_PLAYERS ? MK_MAX_PLAYERS : b[1];
   if ((uint16_t)(4 + n * PB_ENTRY) > len) n = (len - 4) / PB_ENTRY;   // truncated → keep what fits
-  memset(s_lifetime, 0, sizeof(s_lifetime));
+  memset(s_lifetime, 0, MK_MAX_PLAYERS * sizeof *s_lifetime);
   uint16_t o = 4;
   for (int i = 0; i < n; i++) {
     MKRosterEntry *e = &s_roster[i];
@@ -336,6 +340,12 @@ static void hist_import_legacy(void) {
 void mk_init(void) {
   s_rng = (uint32_t)time(NULL) ^ 0x9e3779b9u; if (!s_rng) s_rng = 1;
 
+  // App-lifetime state (see the s_roster note). Allocated before anything below
+  // can touch it; a few hundred bytes at startup on Emery cannot realistically fail.
+  s_roster      = calloc(MK_MAX_PLAYERS, sizeof *s_roster);
+  s_lifetime    = calloc(MK_MAX_PLAYERS, sizeof *s_lifetime);
+  s_player_blob = calloc(1, PB_BLOB_BYTES);
+
   mk_locale_init();   // register the translation tables before anything reads a string
 
   int schema = persist_exists(PK_SCHEMA) ? persist_read_int(PK_SCHEMA) : 0;
@@ -359,7 +369,7 @@ void mk_init(void) {
 
   // Lifetime stats, parallel to the roster. Absent keys (fresh install / older
   // schema) leave the all-zero default, so every player starts with no games.
-  memset(s_lifetime, 0, sizeof(s_lifetime));
+  memset(s_lifetime, 0, MK_MAX_PLAYERS * sizeof *s_lifetime);
   if (persist_exists(PK_STATS))
     persist_read_data(PK_STATS,  s_lifetime,
                       sizeof(MKLifetime) * ROSTER_K1);
@@ -803,7 +813,7 @@ void mk_on_reset_request(void (*cb)(void)) { s_reset_request_cb = cb; }
 void mk_reset_all(void) {
   s_roster_count = 0;
   s_next_id = 1;
-  memset(s_lifetime, 0, sizeof(s_lifetime));
+  memset(s_lifetime, 0, MK_MAX_PLAYERS * sizeof *s_lifetime);
   s_suppress_aux_push = true;        // no empty-roster push — storage_reset's WIPE clears the phone's mirror
   roster_save();
   stats_save();
