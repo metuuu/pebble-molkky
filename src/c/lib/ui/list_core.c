@@ -121,9 +121,12 @@ static void lc_skip_disabled(ListCore *c) {
 
 // --- interactive navigation with edge wrap -----------------------------------
 // Pebble's MenuLayer stops dead at the first/last row. For interactive menus we
-// install our own click config so Up on the first row wraps to the last and Down
-// on the last wraps to the first; every step in between moves normally (and still
-// animates/scrolls, since we drive it through menu_layer_set_selected_*).
+// install our own click config so a distinct Up press on the first row wraps to
+// the last and a distinct Down press on the last wraps to the first; every step
+// in between moves normally (and still animates/scrolls, since we drive it
+// through menu_layer_set_selected_*). Holding the button, however, only repeats
+// while there's somewhere to go — it stops dead at the edge rather than looping,
+// so scrolling through a long list never runs off into a wrap-around.
 #define LC_REPEAT_MS 100   // held Up/Down repeat interval
 
 static MenuIndex lc_first_index(ListCore *c) {
@@ -147,18 +150,22 @@ static bool lc_index_eq(MenuIndex a, MenuIndex b) {
 static void lc_click_up(ClickRecognizerRef ref, void *ctx) {
   ListCore *c = ctx;
   MenuIndex cur = menu_layer_get_selected_index(c->menu);
-  if (lc_index_eq(cur, lc_first_index(c)))                // at the top → wrap to the bottom
-    menu_layer_set_selected_index(c->menu, lc_last_index(c), MenuRowAlignCenter, true);
-  else
+  if (lc_index_eq(cur, lc_first_index(c))) {              // at the top
+    if (click_recognizer_is_repeating(ref)) return;       // held: stop at the edge, don't loop
+    menu_layer_set_selected_index(c->menu, lc_last_index(c), MenuRowAlignCenter, true);  // distinct press: wrap to the bottom
+  } else {
     menu_layer_set_selected_next(c->menu, true, MenuRowAlignCenter, true);
+  }
 }
 static void lc_click_down(ClickRecognizerRef ref, void *ctx) {
   ListCore *c = ctx;
   MenuIndex cur = menu_layer_get_selected_index(c->menu);
-  if (lc_index_eq(cur, lc_last_index(c)))                 // at the bottom → wrap to the top
-    menu_layer_set_selected_index(c->menu, lc_first_index(c), MenuRowAlignCenter, true);
-  else
+  if (lc_index_eq(cur, lc_last_index(c))) {               // at the bottom
+    if (click_recognizer_is_repeating(ref)) return;       // held: stop at the edge, don't loop
+    menu_layer_set_selected_index(c->menu, lc_first_index(c), MenuRowAlignCenter, true);  // distinct press: wrap to the top
+  } else {
     menu_layer_set_selected_next(c->menu, false, MenuRowAlignCenter, true);
+  }
 }
 static void lc_click_select(ClickRecognizerRef ref, void *ctx) {
   ListCore *c = ctx;
