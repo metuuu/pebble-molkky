@@ -119,6 +119,7 @@ textarea::placeholder{color:var(--muted)}
 .modal-actions .btn{flex:1}
 
 .toast{position:fixed;left:50%;bottom:calc(24px + env(safe-area-inset-bottom));
+  z-index:60;   /* above the modals (z 50): copy/paste feedback fires while one is open */
   transform:translateX(-50%) translateY(8px);background:var(--text);color:var(--bg);
   font-size:14px;font-weight:500;padding:10px 18px;border-radius:22px;
   opacity:0;pointer-events:none;transition:opacity .18s,transform .18s}
@@ -248,13 +249,14 @@ function close(o) {
 }
 
 function showModal(m) {
+  clearTimeout(m._hideTimer);   // reopening during the exit animation must stick
   m.hidden = false;
   void m.offsetWidth;   // reflow so the entrance transition runs
   m.classList.add('show');
 }
 function hideModal(m) {
   m.classList.remove('show');
-  setTimeout(function () { m.hidden = true; }, 160);
+  m._hideTimer = setTimeout(function () { m.hidden = true; }, 160);
 }
 
 // A themed yes/no dialog, used in place of the browser's confirm(). Calls onYes only
