@@ -62,13 +62,13 @@ Block block_custom(int16_t height, BlockDraw draw, void *data) {
   return b;
 }
 
-// --- icon cache (for ITEM blocks with ACC_ICON) ------------------------------
+// --- icon cache (for ITEM blocks with ACC_ICON / ACC_ICON_RAW) ---------------
 static GBitmap *view_icon(void *ctx, uint32_t res) {
   View *v = ctx;
   if (!res) return NULL;
   for (int i = 0; i < v->icon_n; i++) if (v->icons[i].res == res) return v->icons[i].bmp;
   if (v->icon_n >= VIEW_ICON_CACHE) return NULL;
-  GBitmap *bmp = gbitmap_create_with_resource(res);
+  GBitmap *bmp = gbitmap_create_with_resource(res & ~LIST_ICON_RAW_BIT);
   v->icons[v->icon_n].res = res;
   v->icons[v->icon_n].bmp = bmp;
   v->icon_n++;
