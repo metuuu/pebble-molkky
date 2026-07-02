@@ -184,6 +184,7 @@ static int      ph_auxlen;
 static bool     ph_has_aux;
 static uint32_t ph_epoch;           // archive identity (storage.js `_epoch`)
 static bool     ph_reload_pending;  // a restore owes the watch a RELOAD (storage.js `:reload`)
+static int      ph_schema = -1;     // records' schema; -1 = none stored (storage.js `:schema`)
 
 static uint32_t rd_u32(const uint8_t *p) { return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24); }
 static void     wr_u32(uint8_t *p, uint32_t v) { p[0] = v; p[1] = v >> 8; p[2] = v >> 16; p[3] = v >> 24; }
@@ -240,6 +241,8 @@ static void phone_handle(FakeDict *msg) {
           const uint8_t *f = dt->buf + i * frame;
           ph_insert(rd_u32(f), f + 4, recsize);
         }
+        FakeTuple *st = ft_find(msg, MESSAGE_KEY_st_schema);
+        if (st) ph_schema = st->v.uint8;
       }
       ph_send_ack();
       break;
@@ -256,6 +259,7 @@ static void phone_handle(FakeDict *msg) {
       FakeDict *d = inbox_new();
       i_u8(d, MESSAGE_KEY_st_type, ST_PAGE);
       i_u32(d, MESSAGE_KEY_st_epoch, ph_epoch);
+      if (ph_schema >= 0) i_u8(d, MESSAGE_KEY_st_schema, (uint8_t)ph_schema);
       i_u8(d, MESSAGE_KEY_st_count, (uint8_t)np);
       i_u32(d, MESSAGE_KEY_st_offset, off);
       i_u32(d, MESSAGE_KEY_st_total, ph_n);
@@ -366,6 +370,7 @@ void fake_phone_import(const uint32_t *seqs, const uint8_t *recs, int n, int rec
   ph_reload_pending = false;                          // queued = delivered in the fake transport
 }
 void fake_phone_set_reload_pending(void) { ph_reload_pending = true; }
+void fake_phone_set_schema(int schema)   { ph_schema = schema; }
 void fake_phone_lose_storage(void) {
   // The phone app was reinstalled / its localStorage cleared: archive and aux are
   // gone and the lazily-minted epoch comes up different.
@@ -399,6 +404,6 @@ void fake_init(void) {
   cb_recv = NULL; cb_sent = NULL; cb_failed = NULL;
   g_connected = false; g_conn_handler = NULL;
   ph_n = 0; ph_auxlen = 0; ph_has_aux = false;
-  ph_epoch = 0xE0C4; ph_reload_pending = false;
+  ph_epoch = 0xE0C4; ph_reload_pending = false; ph_schema = -1;
   memset(g_timers, 0, sizeof g_timers);
 }

@@ -317,6 +317,12 @@ Store.prototype._clear = function () {
 // archive (see the two-pass note below).
 Store.prototype.restore = function (snap) {
   if (!snap || !Array.isArray(snap.records)) throw new Error('invalid snapshot');
+  // A backup written under a different record schema would be reinterpreted as
+  // garbage on the watch — refuse it outright, before touching the archive.
+  // (An empty archive has no schema yet and accepts anything.)
+  var cur = localStorage.getItem(this.p + ':schema');
+  if (cur != null && snap.schema != null && Number(cur) !== Number(snap.schema))
+    throw new Error('backup is from an incompatible app version');
   // Pass 1 — validate every record up front, before clearing anything. A malformed
   // entry partway through must not leave us half-wiped: if we cleared first and then
   // threw, the existing archive would be gone and the new data only partly written.
@@ -374,6 +380,11 @@ Store.prototype._onGet = function (p) {
   msg[KEY.count] = picked.length;
   msg[KEY.offset] = offset;
   msg[KEY.total] = total;
+  // Echo the records' schema so the watch can refuse a page written by a
+  // different app version (e.g. an old backup restored here) instead of
+  // reinterpreting its bytes.
+  var schema = localStorage.getItem(this.p + ':schema');
+  if (schema != null) msg[KEY.schema] = Number(schema) & 0xff;
   if (picked.length) {
     var bytes = [];
     for (var i = 0; i < picked.length; i++) {

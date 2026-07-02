@@ -336,6 +336,37 @@ static void t_reload_preserves_unsynced(void) {
   ASSERT_EQ(storage_cache_count(), 3, "cache holds the preserved + refilled records");
 }
 
+// Records written under a different schema (an old-version backup restored on
+// the phone) must not be reinterpreted: the page is refused and surfaces as a
+// clean failed fetch, not as garbage rows.
+static void t_alien_schema_page_refused(void) {
+  fake_init(); fake_set_connected(true, false); open_store();
+  for (int i = 0; i < 5; i++) { append_val(i + 1); fake_channel_drain(); }
+  ASSERT_EQ(fake_phone_count(), 5, "five records on the phone");
+
+  fake_phone_set_schema(9);                        // the archive now claims another version
+  g_page_count = -1;
+  ASSERT(storage_load_page(1, PAGE), "page request accepted");
+  fake_channel_drain();
+  ASSERT_EQ(g_page_count, 0, "alien-schema page refused (failed fetch, no data)");
+}
+
+// A persisted store from a different record schema is discarded on open — the
+// bytes in its slots no longer mean what the app thinks they mean.
+static void t_alien_schema_store_discarded(void) {
+  fake_init(); fake_set_connected(false, false); open_store();
+  append_val(7);
+  ASSERT_EQ(storage_cache_count(), 1, "one record cached");
+
+  StorageConfig cfg = {
+    .record_size = REC, .cache_capacity = CAP, .max_page = PAGE, .schema = 2, .base_key = BASE,
+    .arena = g_arena, .arena_size = sizeof g_arena,
+    .on_page = on_page, .on_state = on_state, .on_reset_request = on_reset_request, .on_aux = on_aux,
+  };
+  storage_open(&cfg);                              // same store keys, new record schema
+  ASSERT_EQ(storage_cache_count(), 0, "old-schema store starts fresh");
+}
+
 // Paging beyond the local cache: sync-then-fetch returns the requested page.
 static void t_load_page(void) {
   fake_init(); fake_set_connected(true, false); open_store();
@@ -384,6 +415,8 @@ int main(void) {
   fails += run("missed_reload_heals_via_epoch", t_missed_reload_heals_via_epoch);
   fails += run("wiped_phone_reuploads_cache", t_wiped_phone_reuploads_cache);
   fails += run("reload_preserves_unsynced", t_reload_preserves_unsynced);
+  fails += run("alien_schema_page_refused", t_alien_schema_page_refused);
+  fails += run("alien_schema_store_discarded", t_alien_schema_store_discarded);
   fails += run("load_page", t_load_page);
   printf("%s (%d failing)\n", fails ? "SOME TESTS FAILED" : "ALL TESTS PASSED", fails);
   return fails ? 1 : 0;

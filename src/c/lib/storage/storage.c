@@ -179,7 +179,8 @@ static void load_persisted(void) {
   if (!persist_exists(s_cfg.base_key)) return;
   StoreHdr h;
   if (persist_read_data(s_cfg.base_key, &h, sizeof(h)) != (int)sizeof(h)) return;
-  if (h.fmt != STORE_FMT || h.record_size != s_cfg.record_size) return;   // alien layout → start fresh
+  if (h.fmt != STORE_FMT || h.record_size != s_cfg.record_size ||
+      h.schema != s_cfg.schema) return;   // alien layout or record version → start fresh
   s_next_seq = h.next_seq ? h.next_seq : 1;
   s_acked    = h.acked_seq;
   s_epoch    = h.epoch;
@@ -517,6 +518,10 @@ static void on_inbox(DictionaryIterator *it, void *context) {
     if (t) s_total = t->value->uint32;
     uint16_t fs = frame_size();
     uint8_t cnt = (d && d->length >= fs) ? d->length / fs : 0;
+    // Records written under a different schema (an old backup restored on the
+    // phone) would be reinterpreted as garbage — refuse the data, keep the total.
+    Tuple *sc = dict_find(it, MESSAGE_KEY_st_schema);
+    if (sc && sc->value->uint8 != s_cfg.schema) cnt = 0;
     const uint8_t *src = cnt ? d->value->data : NULL;
 
     if (s_inflight == JOB_REFILL) {

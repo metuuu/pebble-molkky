@@ -64,3 +64,4 @@ void fake_phone_send_aux(const uint8_t *data, int len); // store + queue AUX to 
 void fake_phone_hello(void);          // queue HELLO (as PKJS does on every launch)
 void fake_phone_lose_storage(void);   // simulate reinstall: archive gone, new epoch
 void fake_phone_set_reload_pending(void); // re-arm the owed-RELOAD guard (after a dropped RELOAD)
+void fake_phone_set_schema(int schema);   // override the archive's record schema (-1 = none)
