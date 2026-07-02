@@ -3,11 +3,12 @@
 #include "ui_text.h"
 #include "ui_tick.h"
 
-// DEBUG: the left icon. Off for now — the only icons we have are 24px PNGs and
-// the bar is 24px tall, so they're cramped, and Pebble can't runtime-scale a
-// raster bitmap (graphics_draw_bitmap_in_rect clips, it doesn't resample). To
-// show it again, generate a smaller PNG variant (icons.json `size`) and flip
-// this to 1; the title shifts back to the left edge when it's 0.
+// The optional left brand icon is a dormant feature, off by design: the only
+// assets are 24px PNGs and the bar is 24px tall, so they sit cramped, and
+// Pebble can't runtime-scale a raster bitmap (graphics_draw_bitmap_in_rect
+// clips, it doesn't resample). To enable it, generate a smaller PNG variant
+// (icons.json `size`) and flip this to 1; header_create still accepts and owns
+// the icon resource either way, so hosts don't need to change.
 #define HEADER_SHOW_ICON 0
 
 #define LPAD     6
