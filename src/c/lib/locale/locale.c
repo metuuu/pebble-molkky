@@ -1,13 +1,15 @@
 #include "locale.h"
 #include <string.h>
-#include <locale.h>
 #ifdef PBL_SDK_3
 // On the watch, the SDK build disables the C library's <time.h> (-D_TIME_H_) and
-// supplies struct tm / localtime / strftime / setlocale through <pebble.h>.
+// supplies struct tm / localtime / strftime through <pebble.h>. There is no
+// setlocale/<locale.h>: the SDK's strftime already formats using the watch's
+// own system locale, so the C-locale seam below is host-only.
 #include <pebble.h>
 #else
 // Host test build (tools/test): pure standard C.
 #include <time.h>
+#include <locale.h>
 #endif
 
 // =============================================================================
@@ -111,10 +113,14 @@ void locale_set(int i) {
   if (i >= s_count) i = s_count - 1;
   s_active = i;
   // Date seam: a locale with no month table but a platform `sys_locale` formats
-  // dates through the SDK's strftime, so align the C locale to it. Locales that
-  // carry their own month names format dates themselves and don't touch it.
+  // dates through strftime. On the host test build we must align the C locale to
+  // it; on the watch the SDK's strftime already uses the system locale (there is
+  // no setlocale), so this is a no-op there. Locales that carry their own month
+  // names format dates themselves and don't touch it.
+#ifndef PBL_SDK_3
   const Locale *L = &s_locales[i];
   if (!L->months && L->sys_locale) setlocale(LC_TIME, L->sys_locale);
+#endif
 }
 
 // Match a language tag like "fi_FI" / "fi-FI" / "fi": exact `sys_locale` first,
