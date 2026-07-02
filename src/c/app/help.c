@@ -23,11 +23,10 @@
 typedef struct { StrId title; StrId body; } TextPage;
 
 static const TextPage TEXT_PAGES[] = {
-  { STR_HELP_OBJECTIVE_T, STR_HELP_OBJECTIVE_B },
   { STR_HELP_THROWING_T,  STR_HELP_THROWING_B },
   { STR_HELP_SCORING_T,   STR_HELP_SCORING_B },
-  { STR_HELP_OVERSHOOT_T, STR_HELP_OVERSHOOT_B },
   { STR_HELP_WINNING_T,   STR_HELP_WINNING_B },
+  { STR_HELP_OVERSHOOT_T, STR_HELP_OVERSHOOT_B },
 };
 
 static int16_t text_wrap_h(const char *s, UiFont f, int w) {

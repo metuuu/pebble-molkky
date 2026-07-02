@@ -94,7 +94,7 @@ static void reset_do(void *ctx) {
 }
 static void reset_request(void) {
   dialog_confirm_push(t(STR_RESET_CONFIRM_TITLE), t(STR_RESET_CONFIRM_BODY),
-                      t(STR_RESET), UI_BTN_DANGER, reset_do, NULL);
+                      t(STR_RESET), UI_BTN_DANGER, t(STR_CANCEL), reset_do, NULL);
 }
 
 static void init(void) {

@@ -157,13 +157,15 @@ Window *dialog_push(DialogConfig cfg) {
 
 Window *dialog_confirm_push(const char *title, const char *text,
                             const char *confirm_label, UiButtonScheme confirm_scheme,
+                            const char *cancel_label,
                             void (*on_confirm)(void *ctx), void *ctx) {
   return dialog_push((DialogConfig){
     .title = title, .text = text, .button_count = 2, .ctx = ctx,
     .buttons = {
       { .label = confirm_label ? confirm_label : "OK",
         .scheme = confirm_scheme, .on_click = on_confirm },   // confirm on top
-      { .label = "Cancel", .scheme = UI_BTN_NEUTRAL, .on_click = NULL },
+      { .label = cancel_label ? cancel_label : "Cancel",
+        .scheme = UI_BTN_NEUTRAL, .on_click = NULL },
     },
   });
 }

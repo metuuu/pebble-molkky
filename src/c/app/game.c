@@ -167,11 +167,13 @@ static void game_menu_select(void *c, uint16_t i) {
     }
     case GM_END:
       dialog_confirm_push(t(STR_END_GAME_Q), t(STR_END_GAME_BODY),
-                          t(STR_END_GAME), UI_BTN_DANGER, game_end_confirm, NULL);
+                          t(STR_END_GAME), UI_BTN_DANGER, t(STR_CANCEL),
+                          game_end_confirm, NULL);
       break;
     default:  // GM_DISCARD
       dialog_confirm_push(t(STR_DISCARD_GAME_Q), t(STR_DISCARD_GAME_BODY),
-                          t(STR_DISCARD), UI_BTN_DANGER, game_discard_confirm, NULL);
+                          t(STR_DISCARD), UI_BTN_DANGER, t(STR_CANCEL),
+                          game_discard_confirm, NULL);
       break;
   }
 }

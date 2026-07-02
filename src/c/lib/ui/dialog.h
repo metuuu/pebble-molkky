@@ -38,8 +38,10 @@ Window *dialog_push(DialogConfig cfg);
 
 // Convenience: a two-button confirm. The confirm button sits on top in
 // `confirm_scheme` (pass UI_BTN_DANGER for a destructive action — its focused look
-// goes solid-red), with a dismiss-only "Cancel" (NEUTRAL) below it. `confirm_label`
-// defaults to "OK" when NULL.
+// goes solid-red), with a dismiss-only cancel button (NEUTRAL) below it.
+// `confirm_label` defaults to "OK" and `cancel_label` to "Cancel" when NULL — pass
+// a translated string for either.
 Window *dialog_confirm_push(const char *title, const char *text,
                             const char *confirm_label, UiButtonScheme confirm_scheme,
+                            const char *cancel_label,
                             void (*on_confirm)(void *ctx), void *ctx);

@@ -152,7 +152,7 @@ static void do_delete(void *ctx) {
 
 static void confirm_delete(void *ctx) {
   dialog_confirm_push(t(STR_DELETE_GAME_Q), t(STR_DELETE_GAME_BODY),
-                      t(STR_DELETE), UI_BTN_DANGER, do_delete, NULL);
+                      t(STR_DELETE), UI_BTN_DANGER, t(STR_CANCEL), do_delete, NULL);
 }
 
 static uint16_t act_count(void *c) { return 2; }
