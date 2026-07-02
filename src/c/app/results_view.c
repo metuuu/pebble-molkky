@@ -47,7 +47,7 @@ View *results_view_push(const char *title, const ResultRow *rows, int count,
 
   blocks[n++] = block_gap(GAP_MD);
   blocks[n++] = block_section(t(STR_STATS));
-  char val[32];
+  char val[48];   // fits a 15-char name + "100% (255 misses)"
 
   // Accuracy extremes; players with no throws are skipped.
   int hi_i = -1, lo_i = -1, hi_acc = -1, lo_acc = 101;

@@ -244,6 +244,7 @@ static void turn_apply(int id, void *ctx) {
     result_push();
     window_stack_remove(s_turn_window, false);
     window_stack_remove(view_window(s_board_view), false);
+    s_board_view = NULL;                            // the view frees itself on removal
   }
 }
 
@@ -354,6 +355,7 @@ static void place_end(void) {
   result_push();                                     // push result OVER placement
   window_stack_remove(s_place_window, false);
   window_stack_remove(view_window(s_board_view), false);
+  s_board_view = NULL;                               // the view frees itself on removal
 }
 static void place_continue(void) {
   if (mk_game_continue()) window_stack_pop(true);    // pop placement -> board
