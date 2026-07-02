@@ -113,7 +113,12 @@ def main():
         if not r or not r[0].strip():
             continue
         rid = r[0].strip()
-        vals = {lang: (r[cols[lang]] if cols[lang] < len(r) else '') for lang in langs}
+        # Normalize embedded newlines: CSV cells edited on different platforms
+        # carry CRLF, but the watch renders '\n' — a stray '\r' is just an
+        # unknown glyph. Keeps the packs identical however the CSV was saved.
+        vals = {lang: (r[cols[lang]] if cols[lang] < len(r) else '')
+                      .replace('\r\n', '\n').replace('\r', '\n')
+                for lang in langs}
         if rid.startswith('@'):
             for lang in langs:
                 meta[(rid, lang)] = vals[lang]
