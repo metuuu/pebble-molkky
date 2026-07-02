@@ -410,13 +410,26 @@ void mk_init(void) {
   if (schema < 4) hist_import_legacy();   // one-time: move pre-v4 on-watch games into the store
 
   if (persist_exists(PK_GAME_HDR)) {
-    GameHdr h; persist_read_data(PK_GAME_HDR, &h, sizeof(h));
-    s_game.count = h.count; s_game.current = h.current;
-    s_game.group_base = h.group_base; s_game.finishing = h.finishing;
-    s_game.playout = h.playout; s_game.finished = h.finished;
-    s_game.start_time = h.start;
-    persist_read_data(PK_GAME_PLRS, s_game.players, h.count * sizeof(MKGamePlayer));
-    s_game_active = true;
+    // Validate before trusting: a corrupt header (flash damage) would otherwise
+    // drive out-of-bounds player loops. Only app-written data is ever here, so
+    // an inconsistent read means the stored game is garbage — drop it.
+    GameHdr h;
+    bool ok = persist_read_data(PK_GAME_HDR, &h, sizeof(h)) == (int)sizeof(h) &&
+              h.count >= 2 && h.count <= MK_MAX_PLAYERS &&
+              h.current < h.count && h.group_base < h.count;
+    if (ok) ok = persist_read_data(PK_GAME_PLRS, s_game.players,
+                                   h.count * sizeof(MKGamePlayer))
+                 == (int)(h.count * sizeof(MKGamePlayer));
+    if (ok) {
+      s_game.count = h.count; s_game.current = h.current;
+      s_game.group_base = h.group_base; s_game.finishing = h.finishing;
+      s_game.playout = h.playout; s_game.finished = h.finished;
+      s_game.start_time = h.start;
+      s_game_active = true;
+    } else {
+      game_clear_persist();
+      s_game_active = false;
+    }
   } else {
     s_game_active = false;
   }
@@ -814,6 +827,10 @@ void mk_on_reset_request(void (*cb)(void)) { s_reset_request_cb = cb; }
 // (watch cache + the phone's archive). roster_save/stats_save also push the now-empty
 // player blob to the phone; storage_reset clears the phone's games (and aux mirror).
 void mk_reset_all(void) {
+  // "Everything" includes a game in progress: left alive, it would resurface a
+  // board of ids that no longer resolve, and finishing it would append a ghost
+  // game of "deleted" players to the fresh history.
+  mk_game_discard();
   s_roster_count = 0;
   s_next_id = 1;
   memset(s_lifetime, 0, MK_MAX_PLAYERS * sizeof *s_lifetime);
