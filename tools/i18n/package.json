@@ -1,0 +1,9 @@
+{
+  "name": "molkky-i18n",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "strings": "node gen_strings.js"
+  },
+  "dependencies": {}
+}
