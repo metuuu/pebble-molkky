@@ -26,7 +26,9 @@
 // =============================================================================
 
 // Result callback. On OK, `text` is the entered string (valid ONLY during this
-// call — copy it if you need to keep it). On Back/cancel, `text` is NULL.
+// call — copy it if you need to keep it). On Back/cancel, `text` is NULL. The
+// keyboard window removes itself right after this returns, so the handler may
+// freely push a new window (it will stay) or navigate.
 typedef void (*MultitapKeyboardResultHandler)(const char *text, void *context);
 
 // Push the full-screen keyboard. `initial_text` pre-fills the field (pass NULL

@@ -101,13 +101,15 @@ static void prv_touch_handler(const TouchEvent *event, void *context) {
 // ---- Result delivery -------------------------------------------------------
 
 // Hand the result back to the app and close. `text` is NULL on cancel. The
-// keyboard's submit fires this as its last action, so popping (which destroys
-// the keyboard on unload) is safe here.
+// keyboard's submit fires this as its last action, so removing the window
+// (which destroys the keyboard on unload) is safe here. Remove our own window
+// rather than popping the top: a handler is allowed to push a new window, and
+// window_stack_pop(true) would tear that one down instead.
 static void prv_finish(const char *text) {
   if (s_done) return;
   s_done = true;
   if (s_handler) s_handler(text, s_context);   // text valid only during call
-  window_stack_pop(true);
+  window_stack_remove(s_window, true);
 }
 
 static void prv_kb_done(const char *text, void *context) { prv_finish(text); }
