@@ -6,7 +6,7 @@ generator turns it into the compiled string tables the app uses.
 ## Files
 
 - `translations.csv` — edit this. One row per string, one column per language.
-- `gen_strings.py` — from the CSV it generates `src/c/app/strings.h` (the `StrId`
+- `gen_strings.js` — from the CSV it generates `src/c/app/strings.h` (the `StrId`
   enum + macros), `src/c/app/strings.c` (locale registration), and one packed
   blob per language at `resources/data/locale_<lang>.bin`.
 
@@ -27,7 +27,7 @@ them by hand; edit the CSV and regenerate.
 ## Regenerate
 
 ```sh
-npm run strings          # or: python3 tools/i18n/gen_strings.py
+npm run strings          # or: node tools/i18n/gen_strings.js
 ```
 
 Then rebuild the app (`pebble build`). The host test

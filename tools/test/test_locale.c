@@ -30,7 +30,7 @@ static int g_fail;
     }                                                                          \
   } while (0)
 
-// Pack a NULL-tolerant string array exactly as gen_strings.py / the watch
+// Pack a NULL-tolerant string array exactly as gen_strings.js / the watch
 // resource does (u16 count, u16 offsets with 0xFFFF = absent, then the blob), so
 // the tests drive the real indexing path. Caller frees.
 static uint8_t *mk_pack(const char *const *strs, int count) {

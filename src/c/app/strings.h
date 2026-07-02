@@ -1,12 +1,12 @@
 // GENERATED FILE — do not edit by hand.
 // Source: tools/i18n/translations.csv
-// Regenerate: python3 tools/i18n/gen_strings.py  (or: npm run strings)
+// Regenerate: node tools/i18n/gen_strings.js  (or: npm run strings)
 
 #pragma once
 #include "c/lib/locale/locale.h"
 
 // One id per translatable string; the tables ship as packed resources
-// (see gen_strings.py). Call sites use t(id) / tfmt(buf, n, id, ...) /
+// (see gen_strings.js). Call sites use t(id) / tfmt(buf, n, id, ...) /
 // tdate(buf, n, id, time).
 typedef enum {
   STR_RESUME_GAME,

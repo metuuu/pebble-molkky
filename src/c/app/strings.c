@@ -1,6 +1,6 @@
 // GENERATED FILE — do not edit by hand.
 // Source: tools/i18n/translations.csv
-// Regenerate: python3 tools/i18n/gen_strings.py  (or: npm run strings)
+// Regenerate: node tools/i18n/gen_strings.js  (or: npm run strings)
 
 #include "strings.h"
 #ifdef PBL_SDK_3
