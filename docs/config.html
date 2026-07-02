@@ -74,13 +74,21 @@ td:first-child{font-weight:600}
 
 textarea{width:100%;display:block;font:13px/1.4 ui-monospace,Menlo,Consolas,monospace;
   color:var(--text);background:var(--field-bg);border:1px solid var(--field-border);
-  border-radius:10px;padding:10px;margin-bottom:12px;resize:vertical;-webkit-appearance:none}
+  border-radius:10px;padding:10px;margin-bottom:12px;resize:vertical;appearance:none;-webkit-appearance:none}
 textarea:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
 textarea::placeholder{color:var(--muted)}
 
+.format-toggle{display:flex;background:var(--field-bg);border:1px solid var(--field-border);
+  border-radius:10px;padding:3px;margin:0 0 12px}
+.format-toggle input{position:absolute;opacity:0}
+.format-toggle label{flex:1;text-align:center;font:600 13px/1 system-ui,-apple-system,Roboto,sans-serif;
+  color:var(--muted);padding:8px;border-radius:8px;cursor:pointer}
+.format-toggle input:focus + label{box-shadow:0 0 0 3px var(--accent-soft)}
+.format-toggle input:checked + label{background:var(--accent);color:var(--on-accent)}
+
 .btn{display:flex;align-items:center;justify-content:center;gap:7px;width:100%;
   font:600 15px/1 system-ui,-apple-system,Roboto,sans-serif;padding:13px;border:0;border-radius:12px;
-  cursor:pointer;-webkit-appearance:none;color:var(--text);background:var(--neutral-bg);
+  cursor:pointer;appearance:none;-webkit-appearance:none;color:var(--text);background:var(--neutral-bg);
   transition:background .12s,transform .05s,box-shadow .12s}
 .btn:active{transform:scale(.985)}
 .btn-neutral:active{background:var(--neutral-press)}
@@ -133,15 +141,13 @@ textarea::placeholder{color:var(--muted)}
     <h2 class="section-label">Backup &amp; restore</h2>
     <div class="card">
       <div class="card-title">Export a backup</div>
-      <p class="hint">Save all your games and players to a file you can keep or move to another phone.</p>
-      <button id="export" class="btn btn-neutral" type="button"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>Export to file</button>
+      <p class="hint">Copy all your games and players so you can keep them or move them to another phone.</p>
+      <button id="export" class="btn btn-neutral" type="button"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>Export</button>
     </div>
     <div class="card">
       <div class="card-title">Restore from a backup</div>
-      <p class="hint">Load a backup file to bring back your games and players. This replaces what's here now.</p>
-      <button id="import" class="btn btn-neutral" type="button"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 15V3"/><path d="m7 8 5-5 5 5"/><path d="M5 21h14"/></svg>Import from file</button>
-      <input id="file" type="file" accept="application/json,.json,.txt" hidden>
-      <button id="paste" class="btn-link" type="button">Or paste a copied backup…</button>
+      <p class="hint">Paste a backup to bring back your games and players. This replaces what's here now.</p>
+      <button id="import" class="btn btn-neutral" type="button"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 15V3"/><path d="m7 8 5-5 5 5"/><path d="M5 21h14"/></svg>Import</button>
     </div>
   </section>
 
@@ -158,13 +164,18 @@ textarea::placeholder{color:var(--muted)}
 <div class="modal" id="exmodal" hidden>
   <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="ex-title">
     <div class="modal-title" id="ex-title">Backup ready</div>
-    <p class="modal-text">Copy the backup and keep it somewhere safe — a note, a message to yourself, a file.</p>
+    <p class="modal-text">Copy the backup and keep it somewhere safe — a note, a file.</p>
+    <div class="format-toggle" role="radiogroup" aria-label="Backup format">
+      <input id="fmt-json" name="format" type="radio" value="json" checked>
+      <label for="fmt-json">JSON</label>
+      <input id="fmt-b64" name="format" type="radio" value="base64">
+      <label for="fmt-b64">Base64</label>
+    </div>
     <textarea id="ex-area" rows="6" readonly spellcheck="false"></textarea>
     <div class="modal-actions">
       <button class="btn btn-neutral" id="ex-close" type="button">Done</button>
       <button class="btn btn-primary" id="ex-copy" type="button">Copy</button>
     </div>
-    <button class="btn-link" id="ex-download" type="button">Download as a file instead</button>
   </div>
 </div>
 
@@ -172,7 +183,7 @@ textarea::placeholder{color:var(--muted)}
   <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="p-title">
     <div class="modal-title" id="p-title">Paste a backup</div>
     <p class="modal-text">Paste the backup text you copied when exporting.</p>
-    <textarea id="p-area" rows="6" spellcheck="false" autocapitalize="off" autocorrect="off" placeholder='{"records": …}'></textarea>
+    <textarea id="p-area" rows="6" spellcheck="false" autocapitalize="off" autocorrect="off" placeholder="Paste JSON or Base64 backup"></textarea>
     <div class="modal-actions">
       <button class="btn btn-neutral" id="p-cancel" type="button">Cancel</button>
       <button class="btn btn-primary" id="p-ok" type="button">Restore…</button>
@@ -264,30 +275,18 @@ function confirmDialog(opts, onYes) {
   showModal(m);
 }
 
-// Two digits, local date — keeps exported filenames sortable and human-readable.
-function dateStamp() {
-  var d = new Date(), p = function (n) { return (n < 10 ? '0' : '') + n; };
-  return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
+// The page runs inside the phone app's webview, where file import/export is
+// unreliable. Copy/paste works consistently and keeps the restore path visible.
+
+function toBase64(s) {
+  return btoa(unescape(encodeURIComponent(s)));
 }
-
-// The page runs inside the phone app's webview, which ignores <a download> clicks
-// and may never open a file chooser for <input type=file> — neither reports failure,
-// so a download-only export would toast success while doing nothing. Prefer the Web
-// Share API with a real file (the share sheet can save to Files/Drive); when that's
-// unavailable, show the backup for copy/paste, which works in any webview. The
-// <a download> path survives as a button in that fallback for real browsers.
-
-function backupName() { return 'molkky-backup-' + dateStamp() + '.json'; }
-
-function downloadBackup() {
-  try {
-    var url = URL.createObjectURL(new Blob([RAW], { type: 'application/json' }));
-    var a = document.createElement('a');
-    a.href = url; a.download = backupName();
-    document.body.appendChild(a); a.click(); document.body.removeChild(a);
-    setTimeout(function () { URL.revokeObjectURL(url); }, 2000);
-    toast('Check your downloads — if nothing appeared, use Copy');
-  } catch (e) { toast('Could not save the file — use Copy instead'); }
+function fromBase64(s) {
+  try { return decodeURIComponent(escape(atob(String(s).replace(/\s+/g, '')))); }
+  catch (e) {
+    try { return atob(String(s).replace(/\s+/g, '')); }
+    catch (err) { return null; }
+  }
 }
 
 function copyBackup(area, done) {
@@ -308,16 +307,30 @@ function copyBackup(area, done) {
 }
 
 var exModal = document.getElementById('exmodal');
-function showExportFallback() {
-  document.getElementById('ex-area').value = RAW;
+function exportFormat() {
+  return document.getElementById('fmt-b64').checked ? 'base64' : 'json';
+}
+function updateExportArea() {
+  document.getElementById('ex-area').value = exportFormat() === 'base64' ? toBase64(RAW) : RAW;
+}
+function showExportModal() {
+  document.getElementById('fmt-json').checked = true;
+  updateExportArea();
   showModal(exModal);
 }
 document.getElementById('ex-close').onclick = function () { hideModal(exModal); };
 exModal.onclick = function (e) { if (e.target === exModal) hideModal(exModal); };
+document.getElementById('fmt-json').onchange = updateExportArea;
+document.getElementById('fmt-b64').onchange = updateExportArea;
 document.getElementById('ex-copy').onclick = function () {
   copyBackup(document.getElementById('ex-area'), function (ok) {
     toast(ok ? 'Copied — keep it somewhere safe' : 'Copy failed — select the text and copy it yourself');
   });
+};
+
+document.getElementById('export').onclick = function () {
+  if (!RAW) { toast('Nothing to export yet'); return; }
+  showExportModal();
 };
 document.getElementById('ex-download').onclick = downloadBackup;
 
@@ -356,15 +369,47 @@ function tryRestore(text, sourceLabel) {
   }, function () { close({ action: 'import', raw: v }); });
 }
 
-var fileInput = document.getElementById('file');
-document.getElementById('import').onclick = function () { fileInput.value = ''; fileInput.click(); };
-fileInput.onchange = function () {
-  var f = fileInput.files && fileInput.files[0];
-  if (!f) return;
-  var reader = new FileReader();
-  reader.onload = function () { tryRestore(reader.result, '“' + f.name + '”'); };
-  reader.onerror = function () { toast('Could not read that file'); };
-  reader.readAsText(f);
+// Validate the backup shape here, while we can still tell the user. Once the page
+// closes the app restores with no way to report back, so text that parses but isn't
+// a snapshot would otherwise fail silently.
+function parseBackup(text) {
+  var v = String(text || '').trim(), parsed;
+  try {
+    parsed = JSON.parse(v);
+    if (parsed && Array.isArray(parsed.records)) return { raw: v, format: 'JSON' };
+  } catch (e) {}
+  var decoded = fromBase64(v);
+  if (decoded == null) return null;
+  try {
+    parsed = JSON.parse(decoded);
+    if (parsed && Array.isArray(parsed.records)) return { raw: decoded, format: 'Base64' };
+  } catch (err) {}
+  return null;
+}
+function tryRestore(text, sourceLabel) {
+  var backup = parseBackup(text);
+  if (!backup) {
+    toast('That isn’t a Mölkky backup'); return;
+  }
+  confirmDialog({
+    title: 'Replace all data?',
+    text: 'This replaces every game and player on your phone and watch with ' + sourceLabel +
+          '. What’s here now will be gone — export it first if you want to keep it.',
+    confirm: 'Replace'
+  }, function () { close({ action: 'import', raw: backup.raw }); });
+}
+
+var pModal = document.getElementById('pmodal');
+document.getElementById('import').onclick = function () {
+  document.getElementById('p-area').value = '';
+  showModal(pModal);
+};
+document.getElementById('p-cancel').onclick = function () { hideModal(pModal); };
+pModal.onclick = function (e) { if (e.target === pModal) hideModal(pModal); };
+// The confirm dialog stacks on top (it comes later in the DOM), so cancelling it
+// drops the user back on the paste modal with their text intact.
+document.getElementById('p-ok').onclick = function () {
+  tryRestore(document.getElementById('p-area').value, 'the pasted backup');
 };
 
 var pModal = document.getElementById('pmodal');
