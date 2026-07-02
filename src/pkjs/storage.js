@@ -334,15 +334,32 @@ Store.prototype.restore = function (snap) {
     clean.push({ seq: seq, data: r.data });
     insertSorted(seqs, seq);
   }
-  // Pass 2 — the snapshot is sound; commit the replacement. Mark the RELOAD as
-  // owed BEFORE touching the archive: if the watch is unreachable (or we die)
-  // before it lands, handle() keeps dropping inbound traffic and re-sending it —
-  // and hello() retries on the next launch — so the watch can't write into the
-  // restored data under its stale seq space.
+  // Pass 2 — stage the records before touching the live archive. localStorage
+  // writes can throw (quota); staged first, a failure here aborts the restore
+  // with the current archive fully intact. Leftover stage keys from an earlier
+  // interrupted run are swept first.
+  var self = this;
+  function stageKey(seq) { return self.p + ':stage:' + seq; }
+  for (var w = localStorage.length - 1; w >= 0; w--) {
+    var sk = localStorage.key(w);
+    if (sk && sk.indexOf(this.p + ':stage:') === 0) localStorage.removeItem(sk);
+  }
+  try {
+    for (var s = 0; s < clean.length; s++) localStorage.setItem(stageKey(clean[s].seq), clean[s].data);
+  } catch (e) {
+    for (var u = 0; u < clean.length; u++) localStorage.removeItem(stageKey(clean[u].seq));
+    throw new Error('not enough storage for the backup');
+  }
+  // Pass 3 — commit. Mark the RELOAD as owed BEFORE touching the archive: if
+  // the watch is unreachable (or we die) before it lands, handle() keeps
+  // dropping inbound traffic and re-sending it — and hello() retries on the
+  // next launch — so the watch can't write into the restored data under its
+  // stale seq space.
   localStorage.setItem(this._reloadKey(), '1');
   this._clear();
   for (var j = 0; j < clean.length; j++) {
     localStorage.setItem(this._recKey(clean[j].seq), clean[j].data);   // base64 stored verbatim
+    localStorage.removeItem(stageKey(clean[j].seq));                   // each move shrinks usage
   }
   this._saveSeqs(seqs);
   if (snap.schema != null) localStorage.setItem(this.p + ':schema', String(snap.schema));
