@@ -78,14 +78,6 @@ textarea{width:100%;display:block;font:13px/1.4 ui-monospace,Menlo,Consolas,mono
 textarea:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
 textarea::placeholder{color:var(--muted)}
 
-.format-toggle{display:flex;background:var(--field-bg);border:1px solid var(--field-border);
-  border-radius:10px;padding:3px;margin:0 0 12px}
-.format-toggle input{position:absolute;opacity:0}
-.format-toggle label{flex:1;text-align:center;font:600 13px/1 system-ui,-apple-system,Roboto,sans-serif;
-  color:var(--muted);padding:8px;border-radius:8px;cursor:pointer}
-.format-toggle input:focus + label{box-shadow:0 0 0 3px var(--accent-soft)}
-.format-toggle input:checked + label{background:var(--accent);color:var(--on-accent)}
-
 .btn{display:flex;align-items:center;justify-content:center;gap:7px;width:100%;
   font:600 15px/1 system-ui,-apple-system,Roboto,sans-serif;padding:13px;border:0;border-radius:12px;
   cursor:pointer;appearance:none;-webkit-appearance:none;color:var(--text);background:var(--neutral-bg);
@@ -166,12 +158,6 @@ textarea::placeholder{color:var(--muted)}
   <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="ex-title">
     <div class="modal-title" id="ex-title">Backup ready</div>
     <p class="modal-text">Copy the backup and keep it somewhere safe — a note, a file.</p>
-    <div class="format-toggle" role="radiogroup" aria-label="Backup format">
-      <input id="fmt-json" name="format" type="radio" value="json" checked>
-      <label for="fmt-json">JSON</label>
-      <input id="fmt-b64" name="format" type="radio" value="base64">
-      <label for="fmt-b64">Base64</label>
-    </div>
     <textarea id="ex-area" rows="6" readonly spellcheck="false"></textarea>
     <div class="modal-actions">
       <button class="btn btn-neutral" id="ex-close" type="button">Done</button>
@@ -184,7 +170,7 @@ textarea::placeholder{color:var(--muted)}
   <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="p-title">
     <div class="modal-title" id="p-title">Paste a backup</div>
     <p class="modal-text">Paste the backup text you copied when exporting.</p>
-    <textarea id="p-area" rows="6" spellcheck="false" autocapitalize="off" autocorrect="off" placeholder="Paste JSON or Base64 backup"></textarea>
+    <textarea id="p-area" rows="6" spellcheck="false" autocapitalize="off" autocorrect="off" placeholder="Paste your backup"></textarea>
     <div class="modal-actions">
       <button class="btn btn-neutral" id="p-cancel" type="button">Cancel</button>
       <button class="btn btn-primary" id="p-ok" type="button">Restore…</button>
@@ -280,9 +266,8 @@ function confirmDialog(opts, onYes) {
 // The page runs inside the phone app's webview, where file import/export is
 // unreliable. Copy/paste works consistently and keeps the restore path visible.
 
-function toBase64(s) {
-  return btoa(unescape(encodeURIComponent(s)));
-}
+// Base64 backups are no longer produced (export is JSON only), but a previously
+// saved base64 backup must still restore — so import keeps decoding it.
 function fromBase64(s) {
   try { return decodeURIComponent(escape(atob(String(s).replace(/\s+/g, '')))); }
   catch (e) {
@@ -309,21 +294,12 @@ function copyBackup(area, done) {
 }
 
 var exModal = document.getElementById('exmodal');
-function exportFormat() {
-  return document.getElementById('fmt-b64').checked ? 'base64' : 'json';
-}
-function updateExportArea() {
-  document.getElementById('ex-area').value = exportFormat() === 'base64' ? toBase64(RAW) : RAW;
-}
 function showExportModal() {
-  document.getElementById('fmt-json').checked = true;
-  updateExportArea();
+  document.getElementById('ex-area').value = RAW;   // JSON only — the base64 format option is retired
   showModal(exModal);
 }
 document.getElementById('ex-close').onclick = function () { hideModal(exModal); };
 exModal.onclick = function (e) { if (e.target === exModal) hideModal(exModal); };
-document.getElementById('fmt-json').onchange = updateExportArea;
-document.getElementById('fmt-b64').onchange = updateExportArea;
 document.getElementById('ex-copy').onclick = function () {
   copyBackup(document.getElementById('ex-area'), function (ok) {
     toast(ok ? 'Copied — keep it somewhere safe' : 'Copy failed — select the text and copy it yourself');
