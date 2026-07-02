@@ -89,6 +89,11 @@ textarea::placeholder{color:var(--muted)}
 .btn-danger{background:var(--danger);color:var(--on-danger);box-shadow:0 2px 8px rgba(229,72,77,.26)}
 .btn-danger:active{background:var(--danger-press)}
 
+.btn-link{display:block;width:100%;background:none;border:0;color:var(--accent);
+  font:600 14px system-ui,-apple-system,Roboto,sans-serif;padding:12px 0 2px;
+  cursor:pointer;-webkit-appearance:none}
+.btn-link:active{color:var(--accent-press)}
+
 .zone{background:var(--danger-zone-bg);border:1px solid var(--danger-zone-border);box-shadow:none}
 .zone .card-title{color:var(--danger-soft-text)}
 .zone .hint{color:var(--danger-zone-text)}
@@ -136,6 +141,7 @@ textarea::placeholder{color:var(--muted)}
       <p class="hint">Load a backup file to bring back your games and players. This replaces what's here now.</p>
       <button id="import" class="btn btn-neutral" type="button"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 15V3"/><path d="m7 8 5-5 5 5"/><path d="M5 21h14"/></svg>Import from file</button>
       <input id="file" type="file" accept="application/json,.json,.txt" hidden>
+      <button id="paste" class="btn-link" type="button">Or paste a copied backup…</button>
     </div>
   </section>
 
@@ -148,6 +154,31 @@ textarea::placeholder{color:var(--muted)}
     </div>
   </section>
 </main>
+
+<div class="modal" id="exmodal" hidden>
+  <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="ex-title">
+    <div class="modal-title" id="ex-title">Backup ready</div>
+    <p class="modal-text">Copy the backup and keep it somewhere safe — a note, a message to yourself, a file.</p>
+    <textarea id="ex-area" rows="6" readonly spellcheck="false"></textarea>
+    <div class="modal-actions">
+      <button class="btn btn-neutral" id="ex-close" type="button">Done</button>
+      <button class="btn btn-primary" id="ex-copy" type="button">Copy</button>
+    </div>
+    <button class="btn-link" id="ex-download" type="button">Download as a file instead</button>
+  </div>
+</div>
+
+<div class="modal" id="pmodal" hidden>
+  <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="p-title">
+    <div class="modal-title" id="p-title">Paste a backup</div>
+    <p class="modal-text">Paste the backup text you copied when exporting.</p>
+    <textarea id="p-area" rows="6" spellcheck="false" autocapitalize="off" autocorrect="off" placeholder='{"records": …}'></textarea>
+    <div class="modal-actions">
+      <button class="btn btn-neutral" id="p-cancel" type="button">Cancel</button>
+      <button class="btn btn-primary" id="p-ok" type="button">Restore…</button>
+    </div>
+  </div>
+</div>
 
 <div class="modal" id="modal" hidden>
   <div class="modal-card" role="alertdialog" aria-modal="true" aria-labelledby="m-title" aria-describedby="m-text">
@@ -205,6 +236,16 @@ function close(o) {
   location.href = 'pebblejs://close#' + encodeURIComponent(JSON.stringify(o));
 }
 
+function showModal(m) {
+  m.hidden = false;
+  void m.offsetWidth;   // reflow so the entrance transition runs
+  m.classList.add('show');
+}
+function hideModal(m) {
+  m.classList.remove('show');
+  setTimeout(function () { m.hidden = true; }, 160);
+}
+
 // A themed yes/no dialog, used in place of the browser's confirm(). Calls onYes only
 // when the user taps the confirm button; a backdrop tap or Cancel just dismisses it.
 function confirmDialog(opts, onYes) {
@@ -214,16 +255,13 @@ function confirmDialog(opts, onYes) {
   document.getElementById('m-text').textContent = opts.text;
   ok.textContent = opts.confirm || 'OK';
   function hide() {
-    m.classList.remove('show');
-    setTimeout(function () { m.hidden = true; }, 160);
+    hideModal(m);
     ok.onclick = cancel.onclick = m.onclick = null;
   }
   ok.onclick = function () { hide(); onYes(); };
   cancel.onclick = hide;
   m.onclick = function (e) { if (e.target === m) hide(); };   // tap outside to dismiss
-  m.hidden = false;
-  void m.offsetWidth;   // reflow so the entrance transition runs
-  m.classList.add('show');
+  showModal(m);
 }
 
 // Two digits, local date — keeps exported filenames sortable and human-readable.
@@ -232,17 +270,91 @@ function dateStamp() {
   return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
 }
 
-document.getElementById('export').onclick = function () {
-  if (!RAW) { toast('Nothing to export yet'); return; }
+// The page runs inside the phone app's webview, which ignores <a download> clicks
+// and may never open a file chooser for <input type=file> — neither reports failure,
+// so a download-only export would toast success while doing nothing. Prefer the Web
+// Share API with a real file (the share sheet can save to Files/Drive); when that's
+// unavailable, show the backup for copy/paste, which works in any webview. The
+// <a download> path survives as a button in that fallback for real browsers.
+
+function backupName() { return 'molkky-backup-' + dateStamp() + '.json'; }
+
+function downloadBackup() {
   try {
     var url = URL.createObjectURL(new Blob([RAW], { type: 'application/json' }));
     var a = document.createElement('a');
-    a.href = url; a.download = 'molkky-backup-' + dateStamp() + '.json';
+    a.href = url; a.download = backupName();
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
     setTimeout(function () { URL.revokeObjectURL(url); }, 2000);
-    toast('Backup saved');
-  } catch (e) { toast('Could not save the file'); }
+    toast('Check your downloads — if nothing appeared, use Copy');
+  } catch (e) { toast('Could not save the file — use Copy instead'); }
+}
+
+function copyBackup(area, done) {
+  function legacy() {
+    try {
+      area.readOnly = false;   // iOS won't select a read-only field
+      area.focus(); area.setSelectionRange(0, area.value.length);
+      var ok = document.execCommand('copy');
+      area.readOnly = true; area.blur();
+      return ok;
+    } catch (e) { return false; }
+  }
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(area.value).then(
+      function () { done(true); },
+      function () { done(legacy()); });
+  } else { done(legacy()); }
+}
+
+var exModal = document.getElementById('exmodal');
+function showExportFallback() {
+  document.getElementById('ex-area').value = RAW;
+  showModal(exModal);
+}
+document.getElementById('ex-close').onclick = function () { hideModal(exModal); };
+exModal.onclick = function (e) { if (e.target === exModal) hideModal(exModal); };
+document.getElementById('ex-copy').onclick = function () {
+  copyBackup(document.getElementById('ex-area'), function (ok) {
+    toast(ok ? 'Copied — keep it somewhere safe' : 'Copy failed — select the text and copy it yourself');
+  });
 };
+document.getElementById('ex-download').onclick = downloadBackup;
+
+document.getElementById('export').onclick = function () {
+  if (!RAW) { toast('Nothing to export yet'); return; }
+  if (typeof File === 'function' && navigator.canShare) {
+    try {
+      var f = new File([RAW], backupName(), { type: 'application/json' });
+      if (navigator.canShare({ files: [f] })) {
+        navigator.share({ files: [f] }).then(
+          function () { toast('Backup shared'); },
+          function (e) {   // user dismissing the sheet is not a failure
+            if (!e || e.name !== 'AbortError') showExportFallback();
+          });
+        return;
+      }
+    } catch (e) { /* fall through to the copy fallback */ }
+  }
+  showExportFallback();
+};
+
+// Validate the backup shape here, while we can still tell the user. Once the page
+// closes the app restores with no way to report back, so text that parses but isn't
+// a snapshot would otherwise fail silently.
+function tryRestore(text, sourceLabel) {
+  var v = String(text || '').trim(), parsed;
+  try { parsed = JSON.parse(v); } catch (e) { parsed = null; }
+  if (!parsed || !Array.isArray(parsed.records)) {
+    toast('That isn’t a Mölkky backup'); return;
+  }
+  confirmDialog({
+    title: 'Replace all data?',
+    text: 'This replaces every game and player on your phone and watch with ' + sourceLabel +
+          '. What’s here now will be gone — export it first if you want to keep it.',
+    confirm: 'Replace'
+  }, function () { close({ action: 'import', raw: v }); });
+}
 
 var fileInput = document.getElementById('file');
 document.getElementById('import').onclick = function () { fileInput.value = ''; fileInput.click(); };
@@ -250,24 +362,22 @@ fileInput.onchange = function () {
   var f = fileInput.files && fileInput.files[0];
   if (!f) return;
   var reader = new FileReader();
-  reader.onload = function () {
-    var v = String(reader.result || '').trim(), parsed;
-    // Validate the backup shape here, while we can still tell the user. Once the page
-    // closes the app restores with no way to report back, so a file that parses but
-    // isn't a snapshot would otherwise fail silently.
-    try { parsed = JSON.parse(v); } catch (e) { parsed = null; }
-    if (!parsed || !Array.isArray(parsed.records)) {
-      toast('That file isn’t a Mölkky backup'); return;
-    }
-    confirmDialog({
-      title: 'Replace all data?',
-      text: 'This replaces every game and player on your phone and watch with “' + f.name +
-            '”. What’s here now will be gone — export it first if you want to keep it.',
-      confirm: 'Replace'
-    }, function () { close({ action: 'import', raw: v }); });
-  };
+  reader.onload = function () { tryRestore(reader.result, '“' + f.name + '”'); };
   reader.onerror = function () { toast('Could not read that file'); };
   reader.readAsText(f);
+};
+
+var pModal = document.getElementById('pmodal');
+document.getElementById('paste').onclick = function () {
+  document.getElementById('p-area').value = '';
+  showModal(pModal);
+};
+document.getElementById('p-cancel').onclick = function () { hideModal(pModal); };
+pModal.onclick = function (e) { if (e.target === pModal) hideModal(pModal); };
+// The confirm dialog stacks on top (it comes later in the DOM), so cancelling it
+// drops the user back on the paste modal with their text intact.
+document.getElementById('p-ok').onclick = function () {
+  tryRestore(document.getElementById('p-area').value, 'the pasted backup');
 };
 
 // Reset hands off to the watch: closing the page is the only way to reach the app,
